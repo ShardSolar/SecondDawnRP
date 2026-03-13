@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "id": "shipyardsrp",
+  "version": "${version}",
+  "name": "ShipyardsRP",
+  "description": "",
+  "authors": [],
+  "contact": {},
+  "license": "All-Rights-Reserved",
+  "icon": "assets/shipyardsrp/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "fabric-datagen": [
+      "net.shard.client.shipyardsrpDataGenerator"
+    ],
+    "client": [
+      "net.shard.client.shipyardsrpClient"
+    ],
+    "main": [
+      "net.shard.shipyardsrp"
+    ]
+  },
+  "mixins": [
+    "shipyardsrp.mixins.json",
+    {
+      "config": "shipyardsrp.client.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "${minecraft_version}"
+  }
+}
