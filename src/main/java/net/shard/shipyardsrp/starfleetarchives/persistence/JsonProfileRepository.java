@@ -7,21 +7,17 @@ import net.shard.shipyardsrp.starfleetarchives.*;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Collection;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 
 public class JsonProfileRepository implements ProfileRepository {
 
     private final ProfilePaths profilePaths;
     private final ProfileSerializer serializer;
-    private final Gson gson;
+    private final Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
     public JsonProfileRepository(ProfilePaths profilePaths, ProfileSerializer serializer) {
         this.profilePaths = profilePaths;
         this.serializer = serializer;
-        this.gson = new GsonBuilder().setPrettyPrinting().create();
     }
 
     public void init() throws IOException {
@@ -31,14 +27,15 @@ public class JsonProfileRepository implements ProfileRepository {
     @Override
     public Optional<PlayerProfile> load(UUID playerId) {
         Path path = profilePaths.getProfilePath(playerId);
+
         if (!Files.exists(path)) {
             return Optional.empty();
         }
 
         try {
             String json = Files.readString(path);
-            ProfileSaveData saveData = gson.fromJson(json, ProfileSaveData.class);
-            return Optional.of(serializer.fromSaveData(saveData));
+            ProfileSaveData data = gson.fromJson(json, ProfileSaveData.class);
+            return Optional.of(serializer.fromSaveData(data));
         } catch (Exception e) {
             e.printStackTrace();
             return Optional.empty();
@@ -48,10 +45,13 @@ public class JsonProfileRepository implements ProfileRepository {
     @Override
     public void save(PlayerProfile profile) {
         Path path = profilePaths.getProfilePath(profile.getPlayerId());
+
         try {
             Files.createDirectories(profilePaths.getProfilesDirectory());
-            ProfileSaveData saveData = serializer.toSaveData(profile);
-            String json = gson.toJson(saveData);
+
+            ProfileSaveData data = serializer.toSaveData(profile);
+            String json = gson.toJson(data);
+
             Files.writeString(path, json);
         } catch (Exception e) {
             e.printStackTrace();
@@ -69,6 +69,6 @@ public class JsonProfileRepository implements ProfileRepository {
 
     @Override
     public Collection<PlayerProfile> loadAll() {
-        return List.of(); // fine as a Phase 1 stub if unused
+        return List.of(); // fine for now
     }
 }

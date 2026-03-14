@@ -36,6 +36,9 @@ dependencies {
 
     compileOnly "net.luckperms:api:5.4"
     modLocalRuntime "maven.modrinth:luckperms:v5.4.140-fabric"
+    implementation "org.xerial:sqlite-jdbc:3.45.3.0"
+    include "org.xerial:sqlite-jdbc:3.45.3.0"
+
 }
 
 fabricApi {

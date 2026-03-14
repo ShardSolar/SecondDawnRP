@@ -9,10 +9,16 @@ import net.luckperms.api.LuckPerms;
 import net.luckperms.api.LuckPermsProvider;
 import net.minecraft.item.ItemGroups;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.shard.shipyardsrp.database.DatabaseBootstrap;
+import net.shard.shipyardsrp.database.DatabaseConfig;
+import net.shard.shipyardsrp.database.DatabaseManager;
+import net.shard.shipyardsrp.database.DatabaseMigrations;
 import net.shard.shipyardsrp.registry.ModItems;
 import net.shard.shipyardsrp.registry.ModScreenHandlers;
 import net.shard.shipyardsrp.starfleetarchives.*;
+import net.shard.shipyardsrp.starfleetarchives.persistence.JsonProfileRepository;
 import net.shard.shipyardsrp.starfleetarchives.persistence.ProfileRepository;
+import net.shard.shipyardsrp.starfleetarchives.persistence.SqlProfileRepository;
 import net.shard.shipyardsrp.tasksystem.command.TaskCommands;
 import net.shard.shipyardsrp.tasksystem.event.TaskEventRegistrar;
 import net.shard.shipyardsrp.tasksystem.loader.TaskJsonLoader;
@@ -27,6 +33,8 @@ import java.nio.file.Path;
 public class ShipyardsRP implements ModInitializer {
 
     public static final String MOD_ID = "shipyardsrp";
+
+    public static DatabaseManager DATABASE_MANAGER;
 
     public static PlayerProfileManager PROFILE_MANAGER;
     public static PlayerProfileService PROFILE_SERVICE;
@@ -46,24 +54,30 @@ public class ShipyardsRP implements ModInitializer {
 
         Path configDir = Path.of("config");
 
-        ProfilePaths profilePaths = new ProfilePaths(configDir);
-        ProfileSerializer serializer = new ProfileSerializer();
+        // Phase 2 database bootstrap only
+        DatabaseConfig databaseConfig = new DatabaseConfig(configDir);
+        DATABASE_MANAGER = new DatabaseManager(databaseConfig);
 
-        PlayerProfileRepository profileRepositoryImpl = new PlayerProfileRepository(profilePaths, serializer);
         try {
-            profileRepositoryImpl.init();
+            DATABASE_MANAGER.init();
+
+            DatabaseBootstrap databaseBootstrap = new DatabaseBootstrap(
+                    DATABASE_MANAGER,
+                    new DatabaseMigrations()
+            );
+            databaseBootstrap.bootstrap();
         } catch (Exception e) {
-            throw new RuntimeException("Failed to initialize profile repository", e);
+            throw new RuntimeException("Failed to initialize database infrastructure", e);
         }
-        ProfileRepository profileRepository = profileRepositoryImpl;
 
-        JsonTaskStateRepository taskStateRepositoryImpl = new JsonTaskStateRepository(configDir);
+        ProfileRepository profileRepository = new SqlProfileRepository(DATABASE_MANAGER);
+        JsonTaskStateRepository jsonTaskStateRepository = new JsonTaskStateRepository(configDir);
         try {
-            taskStateRepositoryImpl.init();
+            jsonTaskStateRepository.init();
         } catch (Exception e) {
             throw new RuntimeException("Failed to initialize task state repository", e);
         }
-        TaskStateRepository taskStateRepository = taskStateRepositoryImpl;
+        TaskStateRepository taskStateRepository = jsonTaskStateRepository;
 
         DefaultProfileFactory defaultProfileFactory = new DefaultProfileFactory();
         PROFILE_MANAGER = new PlayerProfileManager(profileRepository, defaultProfileFactory);
@@ -123,7 +137,16 @@ public class ShipyardsRP implements ModInitializer {
                     TASK_SERVICE.saveTaskState(profile);
                 }
             }
+
             PROFILE_MANAGER.saveAll();
+
+            if (DATABASE_MANAGER != null) {
+                try {
+                    DATABASE_MANAGER.close();
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to close database manager", e);
+                }
+            }
         });
     }
 }
