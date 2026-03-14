@@ -1,0 +1,13 @@
+{
+  "id": "clean_cargo_bay",
+  "displayName": "Clean Cargo Bay",
+  "description": "Remove trash from the cargo bay.",
+  "division": "OPERATIONS",
+
+  "objectiveType": "BREAK_BLOCK",
+  "targetId": "minecraft:iron_block",
+  "requiredAmount": 20,
+
+  "rewardPoints": 10,
+  "officerConfirmationRequired": false
+}

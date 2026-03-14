@@ -1,4 +1,6 @@
 package net.shard.shipyardsrp.starfleetarchives;
 
-public class RankTrack {
+public enum RankTrack {
+    ENLISTED,
+    OFFICER
 }

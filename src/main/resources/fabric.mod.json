@@ -10,26 +10,21 @@
   "icon": "assets/shipyardsrp/icon.png",
   "environment": "*",
   "entrypoints": {
-    "fabric-datagen": [
-      "net.shard.client.shipyardsrpDataGenerator"
+    "main": [
+      "net.shard.shipyardsrp.ShipyardsRP"
     ],
     "client": [
-      "net.shard.client.shipyardsrpClient"
-    ],
-    "main": [
-      "net.shard.shipyardsrp"
+      "net.shard.shipyardsrp.ShipyardsRPClient"
     ]
   },
+
   "mixins": [
-    "shipyardsrp.mixins.json",
-    {
-      "config": "shipyardsrp.client.mixins.json",
-      "environment": "client"
-    }
+    "shipyardsrp.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=${loader_version}",
     "fabric-api": "*",
-    "minecraft": "${minecraft_version}"
+    "minecraft": "${minecraft_version}",
+    "luckperms": "*"
   }
 }

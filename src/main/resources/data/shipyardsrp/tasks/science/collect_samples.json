@@ -1,0 +1,14 @@
+{
+  "id": "collect_samples",
+  "displayName": "Collect Science Samples",
+  "description": "Gather required research materials.",
+
+  "division": "SCIENCE",
+
+  "objectiveType": "COLLECT_ITEM",
+  "targetId": "minecraft:amethyst_shard",
+  "requiredAmount": 8,
+
+  "rewardPoints": 15,
+  "officerConfirmationRequired": false
+}
