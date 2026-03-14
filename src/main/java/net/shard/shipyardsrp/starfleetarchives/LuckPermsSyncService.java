@@ -5,6 +5,8 @@ import net.luckperms.api.model.user.User;
 import net.luckperms.api.node.Node;
 import net.luckperms.api.node.types.InheritanceNode;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.shard.shipyardsrp.divison.Division;
+import net.shard.shipyardsrp.divison.Rank;
 
 import java.util.Set;
 import java.util.UUID;

@@ -1,5 +1,7 @@
 package net.shard.shipyardsrp.starfleetarchives;
 
+import net.shard.shipyardsrp.starfleetarchives.persistence.ProfileRepository;
+
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
@@ -7,13 +9,14 @@ import java.util.Set;
 import java.util.UUID;
 
 public class PlayerProfileManager {
-    private final PlayerProfileRepository repository;
-    private final DefaultProfileFactory defaultProfileFactory;
 
+    private final ProfileRepository repository;
+    private final DefaultProfileFactory defaultProfileFactory;
     private final Map<UUID, PlayerProfile> loadedProfiles = new HashMap<>();
     private final Set<UUID> dirtyProfiles = new HashSet<>();
 
-    public PlayerProfileManager(PlayerProfileRepository repository, DefaultProfileFactory defaultProfileFactory) {
+
+    public PlayerProfileManager(ProfileRepository repository, DefaultProfileFactory defaultProfileFactory) {
         this.repository = repository;
         this.defaultProfileFactory = defaultProfileFactory;
     }

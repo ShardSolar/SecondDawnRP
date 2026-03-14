@@ -1,8 +1,7 @@
 package net.shard.shipyardsrp.tasksystem.registry;
 
-import net.shard.shipyardsrp.starfleetarchives.Division;
+import net.shard.shipyardsrp.divison.Division;
 import net.shard.shipyardsrp.tasksystem.data.TaskTemplate;
-import net.shard.shipyardsrp.tasksystem.data.TaskObjectiveType;
 
 import java.util.*;
 

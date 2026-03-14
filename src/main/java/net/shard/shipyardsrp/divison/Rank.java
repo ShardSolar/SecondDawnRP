@@ -1,4 +1,4 @@
-package net.shard.shipyardsrp.starfleetarchives;
+package net.shard.shipyardsrp.divison;
 
 public enum Rank {
     // Enlisted

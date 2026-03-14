@@ -1,6 +1,6 @@
 package net.shard.shipyardsrp.tasksystem.data;
 
-import net.shard.shipyardsrp.starfleetarchives.Division;
+import net.shard.shipyardsrp.divison.Division;
 
 import java.util.Objects;
 

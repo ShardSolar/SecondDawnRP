@@ -1,5 +1,8 @@
 package net.shard.shipyardsrp.starfleetarchives;
 
+import net.shard.shipyardsrp.divison.Division;
+import net.shard.shipyardsrp.divison.Rank;
+
 public class LuckPermsGroupMapper {
 
     public String getDivisionGroup(Division division) {

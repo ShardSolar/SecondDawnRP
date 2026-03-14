@@ -1,6 +1,8 @@
 package net.shard.shipyardsrp.starfleetarchives;
 
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.shard.shipyardsrp.divison.Division;
+import net.shard.shipyardsrp.divison.Rank;
 
 import java.util.UUID;
 

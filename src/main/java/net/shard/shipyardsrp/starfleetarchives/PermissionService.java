@@ -4,6 +4,7 @@ import net.luckperms.api.LuckPerms;
 import net.luckperms.api.cacheddata.CachedPermissionData;
 import net.luckperms.api.model.user.User;
 import net.minecraft.server.network.ServerPlayerEntity;
+import net.shard.shipyardsrp.divison.Rank;
 
 public class PermissionService {
     private final LuckPerms luckPerms;

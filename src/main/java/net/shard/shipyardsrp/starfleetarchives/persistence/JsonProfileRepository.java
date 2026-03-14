@@ -1,8 +1,8 @@
-package net.shard.shipyardsrp.starfleetarchives;
+package net.shard.shipyardsrp.starfleetarchives.persistence;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import net.shard.shipyardsrp.starfleetarchives.persistence.ProfileRepository;
+import net.shard.shipyardsrp.starfleetarchives.*;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -12,13 +12,13 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
-public class PlayerProfileRepository implements ProfileRepository {
+public class JsonProfileRepository implements ProfileRepository {
 
     private final ProfilePaths profilePaths;
     private final ProfileSerializer serializer;
     private final Gson gson;
 
-    public PlayerProfileRepository(ProfilePaths profilePaths, ProfileSerializer serializer) {
+    public JsonProfileRepository(ProfilePaths profilePaths, ProfileSerializer serializer) {
         this.profilePaths = profilePaths;
         this.serializer = serializer;
         this.gson = new GsonBuilder().setPrettyPrinting().create();
@@ -38,7 +38,7 @@ public class PlayerProfileRepository implements ProfileRepository {
         try {
             String json = Files.readString(path);
             ProfileSaveData saveData = gson.fromJson(json, ProfileSaveData.class);
-            return Optional.ofNullable(serializer.fromSaveData(saveData));
+            return Optional.of(serializer.fromSaveData(saveData));
         } catch (Exception e) {
             e.printStackTrace();
             return Optional.empty();
@@ -69,6 +69,6 @@ public class PlayerProfileRepository implements ProfileRepository {
 
     @Override
     public Collection<PlayerProfile> loadAll() {
-        return List.of();
+        return List.of(); // fine as a Phase 1 stub if unused
     }
 }

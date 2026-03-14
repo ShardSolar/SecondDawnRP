@@ -6,7 +6,7 @@ import com.google.gson.JsonObject;
 import net.minecraft.resource.Resource;
 import net.minecraft.resource.ResourceManager;
 import net.minecraft.util.Identifier;
-import net.shard.shipyardsrp.starfleetarchives.Division;
+import net.shard.shipyardsrp.divison.Division;
 import net.shard.shipyardsrp.tasksystem.data.TaskObjectiveType;
 import net.shard.shipyardsrp.tasksystem.data.TaskTemplate;
 import net.shard.shipyardsrp.tasksystem.registry.TaskRegistry;

@@ -8,6 +8,8 @@ import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
 import net.shard.shipyardsrp.ShipyardsRP;
+import net.shard.shipyardsrp.divison.Division;
+import net.shard.shipyardsrp.divison.Rank;
 
 public class PlayerProfileCommands {
 

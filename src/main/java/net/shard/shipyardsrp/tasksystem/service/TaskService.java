@@ -11,6 +11,7 @@ import net.shard.shipyardsrp.tasksystem.data.CompletedTaskRecord;
 import net.shard.shipyardsrp.tasksystem.data.TaskAssignmentSource;
 import net.shard.shipyardsrp.tasksystem.data.TaskTemplate;
 import net.shard.shipyardsrp.tasksystem.registry.TaskRegistry;
+import net.shard.shipyardsrp.tasksystem.repository.TaskStateRepository;
 
 import java.util.List;
 import java.util.Objects;
@@ -21,6 +22,7 @@ public class TaskService {
 
     private final PlayerProfileManager profileManager;
     private final TaskRewardService rewardService;
+    private final TaskStateRepository taskStateRepository;
 
     private static MinecraftServer server;
 
@@ -28,9 +30,31 @@ public class TaskService {
         ServerLifecycleEvents.SERVER_STARTED.register(s -> server = s);
     }
 
-    public TaskService(PlayerProfileManager profileManager, TaskRewardService rewardService) {
+    public TaskService(
+            PlayerProfileManager profileManager,
+            TaskRewardService rewardService,
+            TaskStateRepository taskStateRepository
+    ) {
         this.profileManager = Objects.requireNonNull(profileManager, "profileManager");
         this.rewardService = Objects.requireNonNull(rewardService, "rewardService");
+        this.taskStateRepository = Objects.requireNonNull(taskStateRepository, "taskStateRepository");
+    }
+
+    public void loadTaskState(PlayerProfile profile) {
+        Objects.requireNonNull(profile, "profile");
+
+        profile.getActiveTasks().clear();
+        profile.getActiveTasks().addAll(taskStateRepository.loadActiveTasks(profile.getPlayerId()));
+
+        profile.getCompletedTasks().clear();
+        profile.getCompletedTasks().addAll(taskStateRepository.loadCompletedTasks(profile.getPlayerId()));
+    }
+
+    public void saveTaskState(PlayerProfile profile) {
+        Objects.requireNonNull(profile, "profile");
+
+        taskStateRepository.saveActiveTasks(profile.getPlayerId(), profile.getActiveTasks());
+        taskStateRepository.saveCompletedTasks(profile.getPlayerId(), profile.getCompletedTasks());
     }
 
     public boolean assignTask(PlayerProfile profile, String taskId, UUID assignedByUuid, TaskAssignmentSource source) {
@@ -50,9 +74,10 @@ public class TaskService {
         ActiveTask activeTask = new ActiveTask(taskId, assignedByUuid, source);
         profile.getActiveTasks().add(activeTask);
 
+        saveTaskState(profile);
         profileManager.markDirty(profile.getPlayerId());
-        notifyPlayer(profile.getPlayerId(), "New task assigned: " + template.getDisplayName());
 
+        notifyPlayer(profile.getPlayerId(), "New task assigned: " + template.getDisplayName());
         return true;
     }
 
@@ -109,6 +134,7 @@ public class TaskService {
             markTaskComplete(profile, activeTask, template);
         }
 
+        saveTaskState(profile);
         profileManager.markDirty(profile.getPlayerId());
         return true;
     }
@@ -134,6 +160,7 @@ public class TaskService {
 
         completeAndReward(profile, activeTask, template);
 
+        saveTaskState(profile);
         profileManager.markDirty(profile.getPlayerId());
         return true;
     }
@@ -143,12 +170,7 @@ public class TaskService {
 
         if (template.isOfficerConfirmationRequired()) {
             activeTask.setAwaitingOfficerApproval(true);
-
-            notifyPlayer(
-                    profile.getPlayerId(),
-                    "Task ready for approval: " + template.getDisplayName()
-            );
-
+            notifyPlayer(profile.getPlayerId(), "Task ready for approval: " + template.getDisplayName());
         } else {
             completeAndReward(profile, activeTask, template);
         }
@@ -177,8 +199,7 @@ public class TaskService {
 
         notifyPlayer(
                 profile.getPlayerId(),
-                "Task completed: " + template.getDisplayName()
-                        + " | +" + template.getRewardPoints() + " rank points"
+                "Task completed: " + template.getDisplayName() + " | +" + template.getRewardPoints() + " rank points"
         );
     }
 
@@ -190,4 +211,5 @@ public class TaskService {
             player.sendMessage(Text.literal(message), false);
         }
     }
+
 }

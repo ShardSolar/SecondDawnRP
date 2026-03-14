@@ -1,5 +1,7 @@
 package net.shard.shipyardsrp.starfleetarchives;
 
+import net.shard.shipyardsrp.divison.Division;
+import net.shard.shipyardsrp.divison.Rank;
 import net.shard.shipyardsrp.tasksystem.data.ActiveTask;
 import net.shard.shipyardsrp.tasksystem.data.CompletedTaskRecord;
 
