@@ -1,20 +1,20 @@
 {
   "schemaVersion": 1,
-  "id": "shipyardsrp",
+  "id": "seconddawnrp",
   "version": "${version}",
-  "name": "ShipyardsRP",
+  "name": "SecondDawnRP",
   "description": "",
   "authors": [],
   "contact": {},
   "license": "All-Rights-Reserved",
-  "icon": "assets/shipyardsrp/icon.png",
+  "icon": "assets/seconddawnrp/icon.png",
   "environment": "*",
   "entrypoints": {
     "main": [
-      "net.shard.shipyardsrp.ShipyardsRP"
+      "net.shard.seconddawnrp.SecondDawnRP"
     ],
     "client": [
-      "net.shard.shipyardsrp.ShipyardsRPClient"
+      "net.shard.seconddawnrp.SecondDawnRPClient"
     ]
   },
 
