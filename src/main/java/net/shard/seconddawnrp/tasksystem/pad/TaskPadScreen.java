@@ -1,11 +1,13 @@
 package net.shard.seconddawnrp.tasksystem.pad;
 
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.shard.seconddawnrp.SecondDawnRP;
+import net.shard.seconddawnrp.tasksystem.network.SubmitManualConfirmC2SPacket;
 
 import java.util.List;
 
@@ -20,13 +22,11 @@ public class TaskPadScreen extends HandledScreen<TaskPadScreenHandler> {
     private static final int GUI_WIDTH = 380;
     private static final int GUI_HEIGHT = 190;
 
-    // Main content panel
     private static final int CONTENT_X = 24;
     private static final int CONTENT_Y = 90;
     private static final int CONTENT_WIDTH = 326;
     private static final int CONTENT_HEIGHT = 92;
 
-    // Tab boxes in the texture
     private static final int ACTIVE_TAB_X = 19;
     private static final int ACTIVE_TAB_Y = 47;
     private static final int ACTIVE_TAB_W = 110;
@@ -36,6 +36,13 @@ public class TaskPadScreen extends HandledScreen<TaskPadScreenHandler> {
     private static final int HISTORY_TAB_Y = 47;
     private static final int HISTORY_TAB_W = 113;
     private static final int HISTORY_TAB_H = 20;
+
+    private static final int SUBMIT_BUTTON_X = 254;
+    private static final int SUBMIT_BUTTON_Y = 47;
+    private static final int SUBMIT_BUTTON_W = 96;
+    private static final int SUBMIT_BUTTON_H = 20;
+
+    private static final int TASK_BLOCK_HEIGHT = 70;
 
     private boolean showingHistory = false;
 
@@ -71,8 +78,15 @@ public class TaskPadScreen extends HandledScreen<TaskPadScreenHandler> {
         );
 
         drawTabHighlight(context, x, y);
+        if (!showingHistory) {
+            drawActiveSelectionHighlight(context, x, y);
+        }
         drawContent(context, x, y);
         drawTabLabels(context, x, y);
+
+        if (!showingHistory) {
+            drawSubmitButton(context, x, y);
+        }
     }
 
     private void drawTabHighlight(DrawContext context, int x, int y) {
@@ -95,6 +109,29 @@ public class TaskPadScreen extends HandledScreen<TaskPadScreenHandler> {
         }
     }
 
+    private void drawActiveSelectionHighlight(DrawContext context, int x, int y) {
+        int selectedIndex = handler.getSelectedActiveTaskIndex();
+        if (selectedIndex < 0) {
+            return;
+        }
+
+        int highlightY = y + CONTENT_Y + 12 + (selectedIndex * TASK_BLOCK_HEIGHT);
+        int bottom = highlightY + TASK_BLOCK_HEIGHT - 6;
+        int contentBottom = y + CONTENT_Y + CONTENT_HEIGHT;
+
+        if (highlightY >= contentBottom) {
+            return;
+        }
+
+        context.fill(
+                x + CONTENT_X + 2,
+                highlightY,
+                x + CONTENT_X + CONTENT_WIDTH - 4,
+                Math.min(bottom, contentBottom),
+                0x14FFFFFF
+        );
+    }
+
     private void drawTabLabels(DrawContext context, int x, int y) {
         drawCenteredTabText(context, "ACTIVE", x + ACTIVE_TAB_X, y + ACTIVE_TAB_Y, ACTIVE_TAB_W, ACTIVE_TAB_H);
         drawCenteredTabText(context, "HISTORY", x + HISTORY_TAB_X, y + HISTORY_TAB_Y, HISTORY_TAB_W, HISTORY_TAB_H);
@@ -104,6 +141,22 @@ public class TaskPadScreen extends HandledScreen<TaskPadScreenHandler> {
         int textWidth = this.textRenderer.getWidth(text);
         int textX = boxX + (boxW - textWidth) / 2;
         int textY = boxY + (boxH - 8) / 2 + 1;
+
+        context.drawText(this.textRenderer, text, textX, textY, 0xFFF2E7D5, false);
+    }
+
+    private void drawSubmitButton(DrawContext context, int x, int y) {
+        int x1 = x + SUBMIT_BUTTON_X;
+        int y1 = y + SUBMIT_BUTTON_Y;
+        int x2 = x1 + SUBMIT_BUTTON_W;
+        int y2 = y1 + SUBMIT_BUTTON_H;
+
+        context.fill(x1, y1, x2, y2, 0x1800FFAA);
+
+        String text = "SUBMIT";
+        int textWidth = this.textRenderer.getWidth(text);
+        int textX = x1 + (SUBMIT_BUTTON_W - textWidth) / 2;
+        int textY = y1 + (SUBMIT_BUTTON_H - 8) / 2 + 1;
 
         context.drawText(this.textRenderer, text, textX, textY, 0xFFF2E7D5, false);
     }
@@ -171,6 +224,25 @@ public class TaskPadScreen extends HandledScreen<TaskPadScreenHandler> {
         if (inside(mouseX, mouseY, x + HISTORY_TAB_X, y + HISTORY_TAB_Y, HISTORY_TAB_W, HISTORY_TAB_H)) {
             showingHistory = true;
             return true;
+        }
+
+        if (!showingHistory) {
+            List<String> taskIds = handler.getActiveTaskIds();
+            for (int i = 0; i < taskIds.size(); i++) {
+                int blockY = y + CONTENT_Y + 12 + (i * TASK_BLOCK_HEIGHT);
+                if (inside(mouseX, mouseY, x + CONTENT_X, blockY, CONTENT_WIDTH, TASK_BLOCK_HEIGHT - 6)) {
+                    handler.setSelectedActiveTaskIndex(i);
+                    return true;
+                }
+            }
+
+            if (inside(mouseX, mouseY, x + SUBMIT_BUTTON_X, y + SUBMIT_BUTTON_Y, SUBMIT_BUTTON_W, SUBMIT_BUTTON_H)) {
+                String selectedTaskId = handler.getSelectedActiveTaskId();
+                if (selectedTaskId != null) {
+                    ClientPlayNetworking.send(new SubmitManualConfirmC2SPacket(selectedTaskId));
+                }
+                return true;
+            }
         }
 
         return super.mouseClicked(mouseX, mouseY, button);

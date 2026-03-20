@@ -14,19 +14,31 @@ import net.shard.seconddawnrp.database.DatabaseBootstrap;
 import net.shard.seconddawnrp.database.DatabaseConfig;
 import net.shard.seconddawnrp.database.DatabaseManager;
 import net.shard.seconddawnrp.database.DatabaseMigrations;
-import net.shard.seconddawnrp.registry.ModItems;
-import net.shard.seconddawnrp.registry.ModScreenHandlers;
-import net.shard.seconddawnrp.playerdata.*;
+import net.shard.seconddawnrp.playerdata.DefaultProfileFactory;
+import net.shard.seconddawnrp.playerdata.LuckPermsGroupMapper;
+import net.shard.seconddawnrp.playerdata.LuckPermsSyncService;
+import net.shard.seconddawnrp.playerdata.NoOpProfileSyncService;
+import net.shard.seconddawnrp.playerdata.PermissionService;
+import net.shard.seconddawnrp.playerdata.PlayerProfile;
+import net.shard.seconddawnrp.playerdata.PlayerProfileCommands;
+import net.shard.seconddawnrp.playerdata.PlayerProfileManager;
+import net.shard.seconddawnrp.playerdata.PlayerProfileService;
+import net.shard.seconddawnrp.playerdata.ProfileSyncService;
 import net.shard.seconddawnrp.playerdata.persistence.ProfileRepository;
 import net.shard.seconddawnrp.playerdata.persistence.SqlProfileRepository;
+import net.shard.seconddawnrp.registry.ModItems;
+import net.shard.seconddawnrp.registry.ModScreenHandlers;
 import net.shard.seconddawnrp.tasksystem.command.TaskCommands;
 import net.shard.seconddawnrp.tasksystem.event.TaskEventRegistrar;
 import net.shard.seconddawnrp.tasksystem.loader.TaskJsonLoader;
 import net.shard.seconddawnrp.tasksystem.registry.TaskRegistry;
+import net.shard.seconddawnrp.tasksystem.repository.JsonOpsTaskPoolRepository;
 import net.shard.seconddawnrp.tasksystem.repository.JsonTaskStateRepository;
+import net.shard.seconddawnrp.tasksystem.repository.OpsTaskPoolRepository;
 import net.shard.seconddawnrp.tasksystem.repository.TaskStateRepository;
 import net.shard.seconddawnrp.tasksystem.service.TaskRewardService;
 import net.shard.seconddawnrp.tasksystem.service.TaskService;
+import net.shard.seconddawnrp.tasksystem.network.ModNetworking;
 
 import java.nio.file.Path;
 
@@ -49,15 +61,13 @@ public class SecondDawnRP implements ModInitializer {
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(entries -> {
             entries.add(ModItems.TASK_PAD);
             entries.add(ModItems.OPERATIONS_PAD);
-
-
         });
 
         ModScreenHandlers.register();
 
         Path configDir = Path.of("config");
 
-        // Phase 2 database bootstrap only
+        // Database bootstrap
         DatabaseConfig databaseConfig = new DatabaseConfig(configDir);
         DATABASE_MANAGER = new DatabaseManager(databaseConfig);
 
@@ -74,6 +84,7 @@ public class SecondDawnRP implements ModInitializer {
         }
 
         ProfileRepository profileRepository = new SqlProfileRepository(DATABASE_MANAGER);
+
         JsonTaskStateRepository jsonTaskStateRepository = new JsonTaskStateRepository(configDir);
         try {
             jsonTaskStateRepository.init();
@@ -81,6 +92,14 @@ public class SecondDawnRP implements ModInitializer {
             throw new RuntimeException("Failed to initialize task state repository", e);
         }
         TaskStateRepository taskStateRepository = jsonTaskStateRepository;
+
+        JsonOpsTaskPoolRepository jsonOpsTaskPoolRepository = new JsonOpsTaskPoolRepository(configDir);
+        try {
+            jsonOpsTaskPoolRepository.init();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize ops task pool repository", e);
+        }
+        OpsTaskPoolRepository opsTaskPoolRepository = jsonOpsTaskPoolRepository;
 
         DefaultProfileFactory defaultProfileFactory = new DefaultProfileFactory();
         PROFILE_MANAGER = new PlayerProfileManager(profileRepository, defaultProfileFactory);
@@ -90,7 +109,14 @@ public class SecondDawnRP implements ModInitializer {
 
         TaskRegistry.bootstrap();
         TASK_REWARD_SERVICE = new TaskRewardService();
-        TASK_SERVICE = new TaskService(PROFILE_MANAGER, TASK_REWARD_SERVICE, taskStateRepository);
+        TASK_SERVICE = new TaskService(
+                PROFILE_MANAGER,
+                TASK_REWARD_SERVICE,
+                taskStateRepository,
+                opsTaskPoolRepository
+        );
+
+        ModNetworking.registerC2SPackets();
 
         TaskEventRegistrar.register(PROFILE_MANAGER, TASK_SERVICE);
 
@@ -156,5 +182,4 @@ public class SecondDawnRP implements ModInitializer {
     public static Identifier id(String path) {
         return Identifier.of(MOD_ID, path);
     }
-
 }

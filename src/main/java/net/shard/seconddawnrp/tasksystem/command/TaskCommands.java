@@ -13,7 +13,6 @@ import net.shard.seconddawnrp.tasksystem.data.ActiveTask;
 import net.shard.seconddawnrp.tasksystem.data.CompletedTaskRecord;
 import net.shard.seconddawnrp.tasksystem.data.TaskAssignmentSource;
 import net.shard.seconddawnrp.tasksystem.data.TaskTemplate;
-import net.shard.seconddawnrp.tasksystem.registry.TaskRegistry;
 import net.shard.seconddawnrp.tasksystem.service.TaskService;
 
 import java.util.List;
@@ -47,7 +46,7 @@ public final class TaskCommands {
                                                     targetPlayer.getName().getString()
                                             );
 
-                                            TaskTemplate template = TaskRegistry.get(taskId);
+                                            TaskTemplate template = taskService.resolveTaskTemplate(taskId);
                                             if (template == null) {
                                                 context.getSource().sendError(Text.literal("Unknown task id: " + taskId));
                                                 return 0;
@@ -82,7 +81,7 @@ public final class TaskCommands {
                                 return 0;
                             }
 
-                            return sendTaskList(context.getSource(), profileManager, self);
+                            return sendTaskList(context.getSource(), profileManager, taskService, self);
                         })
                         .then(argument("player", EntityArgumentType.player())
                                 .executes(context -> {
@@ -94,7 +93,7 @@ public final class TaskCommands {
                                         return 0;
                                     }
 
-                                    return sendTaskList(context.getSource(), profileManager, targetPlayer);
+                                    return sendTaskList(context.getSource(), profileManager, taskService, targetPlayer);
                                 })))
 
 
@@ -106,7 +105,7 @@ public final class TaskCommands {
                                 return 0;
                             }
 
-                            return sendTaskProgress(context.getSource(), profileManager, self);
+                            return sendTaskProgress(context.getSource(), profileManager, taskService, self);
                         })
                         .then(argument("player", EntityArgumentType.player())
                                 .executes(context -> {
@@ -118,7 +117,7 @@ public final class TaskCommands {
                                         return 0;
                                     }
 
-                                    return sendTaskProgress(context.getSource(), profileManager, targetPlayer);
+                                    return sendTaskProgress(context.getSource(), profileManager, taskService, targetPlayer);
                                 })))
 
 
@@ -160,7 +159,7 @@ public final class TaskCommands {
                                 return 0;
                             }
 
-                            return sendCompletedTasks(context.getSource(), profileManager, self);
+                            return sendCompletedTasks(context.getSource(), profileManager, taskService, self);
                         })
                         .then(argument("player", EntityArgumentType.player())
                                 .executes(context -> {
@@ -172,7 +171,7 @@ public final class TaskCommands {
                                         return 0;
                                     }
 
-                                    return sendCompletedTasks(context.getSource(), profileManager, targetPlayer);
+                                    return sendCompletedTasks(context.getSource(), profileManager, taskService, targetPlayer);
                                 })))
 
                 .then(literal("history")
@@ -183,7 +182,7 @@ public final class TaskCommands {
                                 return 0;
                             }
 
-                            return sendCompletedTasks(context.getSource(), profileManager, self);
+                            return sendCompletedTasks(context.getSource(), profileManager, taskService, self);
                         })
                         .then(argument("player", EntityArgumentType.player())
                                 .executes(context -> {
@@ -195,7 +194,7 @@ public final class TaskCommands {
                                         return 0;
                                     }
 
-                                    return sendCompletedTasks(context.getSource(), profileManager, targetPlayer);
+                                    return sendCompletedTasks(context.getSource(), profileManager, taskService, targetPlayer);
                                 })))
 
                 .then(literal("debug")
@@ -215,7 +214,7 @@ public final class TaskCommands {
                                                                     targetPlayer.getName().getString()
                                                             );
 
-                                                            TaskTemplate template = TaskRegistry.get(taskId);
+                                                            TaskTemplate template = taskService.resolveTaskTemplate(taskId);
                                                             if (template == null) {
                                                                 context.getSource().sendError(Text.literal("Unknown task id: " + taskId));
                                                                 return 0;
@@ -259,7 +258,7 @@ public final class TaskCommands {
         );
     }
 
-    private static int sendTaskList(ServerCommandSource source, PlayerProfileManager profileManager, ServerPlayerEntity targetPlayer) {
+    private static int sendTaskList(ServerCommandSource source, PlayerProfileManager profileManager, TaskService taskService, ServerPlayerEntity targetPlayer) {
         PlayerProfile profile = profileManager.getOrLoadProfile(
                 targetPlayer.getUuid(),
                 targetPlayer.getName().getString()
@@ -274,7 +273,7 @@ public final class TaskCommands {
         source.sendMessage(Text.literal("Active tasks for " + targetPlayer.getName().getString() + ":"));
 
         for (ActiveTask activeTask : activeTasks) {
-            TaskTemplate template = TaskRegistry.get(activeTask.getTemplateId());
+            TaskTemplate template = taskService.resolveTaskTemplate(activeTask.getTemplateId());
 
             if (template == null) {
                 source.sendMessage(Text.literal("- " + activeTask.getTemplateId() + " (missing template)"));
@@ -294,7 +293,7 @@ public final class TaskCommands {
         return 1;
     }
 
-    private static int sendTaskProgress(ServerCommandSource source, PlayerProfileManager profileManager, ServerPlayerEntity targetPlayer) {
+    private static int sendTaskProgress(ServerCommandSource source, PlayerProfileManager profileManager, TaskService taskService, ServerPlayerEntity targetPlayer) {
         PlayerProfile profile = profileManager.getOrLoadProfile(
                 targetPlayer.getUuid(),
                 targetPlayer.getName().getString()
@@ -309,7 +308,7 @@ public final class TaskCommands {
         source.sendMessage(Text.literal("Task progress for " + targetPlayer.getName().getString() + ":"));
 
         for (ActiveTask activeTask : activeTasks) {
-            TaskTemplate template = TaskRegistry.get(activeTask.getTemplateId());
+            TaskTemplate template = taskService.resolveTaskTemplate(activeTask.getTemplateId());
             if (template == null) {
                 source.sendMessage(Text.literal("- " + activeTask.getTemplateId() + ": missing template"));
                 continue;
@@ -382,8 +381,6 @@ public final class TaskCommands {
             case VISIT_LOCATION -> "Visit " + targetId;
             case MANUAL_CONFIRM -> "Officer approval required";
         };
-
-
     }
 
     private static String formatTimestamp(long epochMillis) {
@@ -392,8 +389,7 @@ public final class TaskCommands {
         return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(dateTime);
     }
 
-    private static int sendCompletedTasks(ServerCommandSource source, PlayerProfileManager profileManager, ServerPlayerEntity targetPlayer) {
-
+    private static int sendCompletedTasks(ServerCommandSource source, PlayerProfileManager profileManager, TaskService taskService, ServerPlayerEntity targetPlayer) {
         PlayerProfile profile = profileManager.getOrLoadProfile(
                 targetPlayer.getUuid(),
                 targetPlayer.getName().getString()
@@ -409,8 +405,7 @@ public final class TaskCommands {
         source.sendMessage(Text.literal("Completed tasks for " + targetPlayer.getName().getString() + ":"));
 
         for (CompletedTaskRecord record : completed) {
-
-            TaskTemplate template = TaskRegistry.get(record.getTemplateId());
+            TaskTemplate template = taskService.resolveTaskTemplate(record.getTemplateId());
 
             String name = template != null ? template.getDisplayName() : record.getTemplateId();
             int reward = record.getRewardPointsGranted();
@@ -423,7 +418,4 @@ public final class TaskCommands {
 
         return 1;
     }
-
-
-
 }

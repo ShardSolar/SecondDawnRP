@@ -6,12 +6,11 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.shard.seconddawnrp.SecondDawnRP;
-import net.shard.seconddawnrp.registry.ModScreenHandlers;
 import net.shard.seconddawnrp.playerdata.PlayerProfile;
+import net.shard.seconddawnrp.registry.ModScreenHandlers;
 import net.shard.seconddawnrp.tasksystem.data.ActiveTask;
 import net.shard.seconddawnrp.tasksystem.data.CompletedTaskRecord;
 import net.shard.seconddawnrp.tasksystem.data.TaskTemplate;
-import net.shard.seconddawnrp.tasksystem.registry.TaskRegistry;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -28,17 +27,25 @@ public class TaskPadScreenHandler extends ScreenHandler {
 
     private final List<String> activeLines;
     private final List<String> completedLines;
+    private final List<String> activeTaskIds;
+    private int selectedActiveTaskIndex;
 
-    // Client-side constructor used by ExtendedScreenHandlerType
     public TaskPadScreenHandler(int syncId, PlayerInventory playerInventory, TaskPadOpeningData data) {
-        this(syncId, playerInventory, data.activeLines(), data.completedLines());
+        this(syncId, playerInventory, data.activeLines(), data.completedLines(), data.activeTaskIds());
     }
 
-    // Server-side constructor used when opening the screen
-    public TaskPadScreenHandler(int syncId, PlayerInventory playerInventory, List<String> activeLines, List<String> completedLines) {
+    public TaskPadScreenHandler(
+            int syncId,
+            PlayerInventory playerInventory,
+            List<String> activeLines,
+            List<String> completedLines,
+            List<String> activeTaskIds
+    ) {
         super(ModScreenHandlers.TASK_PAD_SCREEN, syncId);
         this.activeLines = new ArrayList<>(activeLines);
         this.completedLines = new ArrayList<>(completedLines);
+        this.activeTaskIds = new ArrayList<>(activeTaskIds);
+        this.selectedActiveTaskIndex = this.activeTaskIds.isEmpty() ? -1 : 0;
     }
 
     public List<String> getActiveLines() {
@@ -47,6 +54,27 @@ public class TaskPadScreenHandler extends ScreenHandler {
 
     public List<String> getCompletedLines() {
         return Collections.unmodifiableList(completedLines);
+    }
+
+    public List<String> getActiveTaskIds() {
+        return Collections.unmodifiableList(activeTaskIds);
+    }
+
+    public int getSelectedActiveTaskIndex() {
+        return selectedActiveTaskIndex;
+    }
+
+    public void setSelectedActiveTaskIndex(int index) {
+        if (index >= 0 && index < activeTaskIds.size()) {
+            this.selectedActiveTaskIndex = index;
+        }
+    }
+
+    public String getSelectedActiveTaskId() {
+        if (selectedActiveTaskIndex < 0 || selectedActiveTaskIndex >= activeTaskIds.size()) {
+            return null;
+        }
+        return activeTaskIds.get(selectedActiveTaskIndex);
     }
 
     @Override
@@ -60,36 +88,42 @@ public class TaskPadScreenHandler extends ScreenHandler {
     }
 
     public static TaskPadOpeningData createOpeningData(ServerPlayerEntity player) {
+        ActiveTaskViewData activeData = buildActiveData(player);
+
         return new TaskPadOpeningData(
-                buildActiveLines(player),
-                buildCompletedLines(player)
+                activeData.lines(),
+                buildCompletedLines(player),
+                activeData.taskIds()
         );
     }
 
-    public static List<String> buildActiveLines(ServerPlayerEntity player) {
+    public static ActiveTaskViewData buildActiveData(ServerPlayerEntity player) {
         PlayerProfile profile = SecondDawnRP.PROFILE_MANAGER.getOrLoadProfile(
                 player.getUuid(),
                 player.getName().getString()
         );
 
         List<String> lines = new ArrayList<>();
+        List<String> taskIds = new ArrayList<>();
+
         lines.add("Active Tasks");
 
         if (profile.getActiveTasks().isEmpty()) {
             lines.add("No active tasks.");
-            return lines;
+            return new ActiveTaskViewData(lines, taskIds);
         }
 
         for (ActiveTask activeTask : profile.getActiveTasks()) {
-            TaskTemplate template = TaskRegistry.get(activeTask.getTemplateId());
+            TaskTemplate template = SecondDawnRP.TASK_SERVICE.resolveTaskTemplate(activeTask.getTemplateId());
+
+            lines.add(" ");
 
             if (template == null) {
-                lines.add(" ");
                 lines.add("[Missing Template] " + activeTask.getTemplateId());
+                taskIds.add(activeTask.getTemplateId());
                 continue;
             }
 
-            lines.add(" ");
             lines.add(template.getDisplayName());
             lines.add("[" + template.getId() + "]");
             lines.add("Objective: " + formatObjective(template));
@@ -105,9 +139,10 @@ public class TaskPadScreenHandler extends ScreenHandler {
             }
 
             lines.add("Reward: " + template.getRewardPoints() + " RP");
+            taskIds.add(activeTask.getTemplateId());
         }
 
-        return lines;
+        return new ActiveTaskViewData(lines, taskIds);
     }
 
     public static List<String> buildCompletedLines(ServerPlayerEntity player) {
@@ -125,7 +160,7 @@ public class TaskPadScreenHandler extends ScreenHandler {
         }
 
         for (CompletedTaskRecord record : profile.getCompletedTasks()) {
-            TaskTemplate template = TaskRegistry.get(record.getTemplateId());
+            TaskTemplate template = SecondDawnRP.TASK_SERVICE.resolveTaskTemplate(record.getTemplateId());
             String displayName = template != null ? template.getDisplayName() : record.getTemplateId();
 
             lines.add(" ");
@@ -160,5 +195,8 @@ public class TaskPadScreenHandler extends ScreenHandler {
             case VISIT_LOCATION -> "Visit " + targetId;
             case MANUAL_CONFIRM -> "Officer approval required";
         };
+    }
+
+    public record ActiveTaskViewData(List<String> lines, List<String> taskIds) {
     }
 }

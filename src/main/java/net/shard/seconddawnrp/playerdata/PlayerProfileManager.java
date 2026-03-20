@@ -2,11 +2,7 @@ package net.shard.seconddawnrp.playerdata;
 
 import net.shard.seconddawnrp.playerdata.persistence.ProfileRepository;
 
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
 
 public class PlayerProfileManager {
 
@@ -68,4 +64,9 @@ public class PlayerProfileManager {
         loadedProfiles.remove(playerId);
         dirtyProfiles.remove(playerId);
     }
+
+    public Collection<PlayerProfile> getLoadedProfiles() {
+        return Collections.unmodifiableCollection(loadedProfiles.values());
+    }
+
 }

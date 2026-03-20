@@ -4,15 +4,23 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.text.Text;
+import net.shard.seconddawnrp.divison.Division;
 import net.shard.seconddawnrp.playerdata.PlayerProfile;
 import net.shard.seconddawnrp.playerdata.PlayerProfileManager;
 import net.shard.seconddawnrp.tasksystem.data.ActiveTask;
 import net.shard.seconddawnrp.tasksystem.data.CompletedTaskRecord;
+import net.shard.seconddawnrp.tasksystem.data.OpsTaskPoolEntry;
+import net.shard.seconddawnrp.tasksystem.data.OpsTaskStatus;
 import net.shard.seconddawnrp.tasksystem.data.TaskAssignmentSource;
+import net.shard.seconddawnrp.tasksystem.data.TaskObjectiveType;
 import net.shard.seconddawnrp.tasksystem.data.TaskTemplate;
+import net.shard.seconddawnrp.tasksystem.pad.AdminTaskViewModel;
 import net.shard.seconddawnrp.tasksystem.registry.TaskRegistry;
+import net.shard.seconddawnrp.tasksystem.repository.OpsTaskPoolRepository;
 import net.shard.seconddawnrp.tasksystem.repository.TaskStateRepository;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -23,21 +31,28 @@ public class TaskService {
     private final PlayerProfileManager profileManager;
     private final TaskRewardService rewardService;
     private final TaskStateRepository taskStateRepository;
+    private final OpsTaskPoolRepository opsTaskPoolRepository;
+
+    private final List<OpsTaskPoolEntry> poolEntries = new ArrayList<>();
 
     private static MinecraftServer server;
 
     static {
-        ServerLifecycleEvents.SERVER_STARTED.register(s -> server = s);
+        ServerLifecycleEvents.SERVER_STARTED.register(startedServer -> server = startedServer);
     }
 
     public TaskService(
             PlayerProfileManager profileManager,
             TaskRewardService rewardService,
-            TaskStateRepository taskStateRepository
+            TaskStateRepository taskStateRepository,
+            OpsTaskPoolRepository opsTaskPoolRepository
     ) {
         this.profileManager = Objects.requireNonNull(profileManager, "profileManager");
         this.rewardService = Objects.requireNonNull(rewardService, "rewardService");
         this.taskStateRepository = Objects.requireNonNull(taskStateRepository, "taskStateRepository");
+        this.opsTaskPoolRepository = Objects.requireNonNull(opsTaskPoolRepository, "opsTaskPoolRepository");
+
+        this.poolEntries.addAll(this.opsTaskPoolRepository.loadAll());
     }
 
     public void loadTaskState(PlayerProfile profile) {
@@ -57,12 +72,20 @@ public class TaskService {
         taskStateRepository.saveCompletedTasks(profile.getPlayerId(), profile.getCompletedTasks());
     }
 
+    private void savePoolState() {
+        opsTaskPoolRepository.saveAll(poolEntries);
+    }
+
+    public List<OpsTaskPoolEntry> getPoolEntries() {
+        return List.copyOf(poolEntries);
+    }
+
     public boolean assignTask(PlayerProfile profile, String taskId, UUID assignedByUuid, TaskAssignmentSource source) {
         Objects.requireNonNull(profile, "profile");
         Objects.requireNonNull(taskId, "taskId");
         Objects.requireNonNull(source, "source");
 
-        TaskTemplate template = TaskRegistry.get(taskId);
+        TaskTemplate template = resolveTaskTemplate(taskId);
         if (template == null) {
             return false;
         }
@@ -108,7 +131,7 @@ public class TaskService {
             return false;
         }
 
-        TaskTemplate template = TaskRegistry.get(taskId);
+        TaskTemplate template = resolveTaskTemplate(taskId);
         if (template == null) {
             return false;
         }
@@ -136,6 +159,7 @@ public class TaskService {
 
         saveTaskState(profile);
         profileManager.markDirty(profile.getPlayerId());
+        syncPoolStatusFromProfiles();
         return true;
     }
 
@@ -153,7 +177,7 @@ public class TaskService {
             return false;
         }
 
-        TaskTemplate template = TaskRegistry.get(taskId);
+        TaskTemplate template = resolveTaskTemplate(taskId);
         if (template == null) {
             return false;
         }
@@ -162,7 +186,375 @@ public class TaskService {
 
         saveTaskState(profile);
         profileManager.markDirty(profile.getPlayerId());
+        syncPoolStatusFromProfiles();
         return true;
+    }
+
+    public boolean submitManualConfirmTaskForReview(PlayerProfile profile, String taskId) {
+        Objects.requireNonNull(profile, "profile");
+        Objects.requireNonNull(taskId, "taskId");
+
+        Optional<ActiveTask> optionalTask = findActiveTask(profile, taskId);
+        if (optionalTask.isEmpty()) {
+            return false;
+        }
+
+        ActiveTask activeTask = optionalTask.get();
+        TaskTemplate template = resolveTaskTemplate(taskId);
+        if (template == null) {
+            return false;
+        }
+
+        if (template.getObjectiveType() != TaskObjectiveType.MANUAL_CONFIRM) {
+            return false;
+        }
+
+        if (activeTask.isAwaitingOfficerApproval() || activeTask.isRewardClaimed() || activeTask.isComplete()) {
+            return false;
+        }
+
+        activeTask.setCurrentProgress(template.getRequiredAmount());
+        markTaskComplete(profile, activeTask, template);
+
+        saveTaskState(profile);
+        profileManager.markDirty(profile.getPlayerId());
+        syncPoolStatusFromProfiles();
+        return true;
+    }
+
+    public boolean createPoolTask(
+            String taskId,
+            String displayName,
+            String description,
+            Division division,
+            TaskObjectiveType objectiveType,
+            String targetId,
+            int requiredAmount,
+            int rewardPoints,
+            boolean officerConfirmationRequired,
+            UUID createdBy
+    ) {
+        if (taskId == null || taskId.isBlank()) return false;
+        if (displayName == null || displayName.isBlank()) return false;
+        if (description == null || description.isBlank()) return false;
+        if (division == null) return false;
+        if (objectiveType == null) return false;
+        if (targetId == null || targetId.isBlank()) return false;
+        if (requiredAmount <= 0) return false;
+        if (rewardPoints < 0) return false;
+
+        boolean duplicate = poolEntries.stream()
+                .anyMatch(entry -> entry.getTaskId().equalsIgnoreCase(taskId));
+        if (duplicate) {
+            return false;
+        }
+
+        OpsTaskPoolEntry entry = new OpsTaskPoolEntry(
+                taskId,
+                displayName,
+                description,
+                division,
+                objectiveType,
+                targetId,
+                requiredAmount,
+                rewardPoints,
+                officerConfirmationRequired,
+                createdBy,
+                System.currentTimeMillis(),
+                OpsTaskStatus.UNASSIGNED
+        );
+
+        poolEntries.add(entry);
+        savePoolState();
+        return true;
+    }
+
+    public boolean publishPoolTask(String taskId) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) {
+            return false;
+        }
+
+        entry.setAssignedPlayerUuid(null);
+        entry.setAssignedByUuid(null);
+        entry.setPooledDivision(null);
+        entry.setStatus(OpsTaskStatus.PUBLIC);
+        savePoolState();
+        return true;
+    }
+
+    public boolean assignPoolTaskToDivisionPool(String taskId, Division division) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null || division == null) {
+            return false;
+        }
+
+        entry.setAssignedPlayerUuid(null);
+        entry.setAssignedByUuid(null);
+        entry.setPooledDivision(division);
+        entry.setStatus(OpsTaskStatus.UNASSIGNED);
+        savePoolState();
+        return true;
+    }
+
+    public boolean assignPoolTaskToPlayer(String taskId, PlayerProfile profile, UUID assignedByUuid) {
+        Objects.requireNonNull(profile, "profile");
+
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) {
+            return false;
+        }
+
+        boolean assigned = assignTask(profile, taskId, assignedByUuid, TaskAssignmentSource.OFFICER);
+        if (!assigned) {
+            return false;
+        }
+
+        entry.setAssignedPlayerUuid(profile.getPlayerId());
+        entry.setAssignedByUuid(assignedByUuid);
+        entry.setPooledDivision(null);
+        entry.setStatus(OpsTaskStatus.ASSIGNED);
+        savePoolState();
+        return true;
+    }
+
+    public boolean cancelPoolTask(String taskId) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) {
+            return false;
+        }
+
+        entry.setStatus(OpsTaskStatus.CANCELED);
+
+        if (entry.getAssignedPlayerUuid() != null) {
+            notifyPlayer(entry.getAssignedPlayerUuid(), "Task removed: " + entry.getDisplayName());
+        }
+
+        savePoolState();
+        return true;
+    }
+
+    public boolean archivePoolTask(String taskId) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) {
+            return false;
+        }
+
+        entry.setStatus(OpsTaskStatus.ARCHIVED);
+        savePoolState();
+        return true;
+    }
+
+    public boolean returnTaskToInProgress(String taskId, String denialNote) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) {
+            return false;
+        }
+
+        entry.setReviewNote(denialNote);
+        entry.setStatus(OpsTaskStatus.IN_PROGRESS);
+        savePoolState();
+        return true;
+    }
+
+    public boolean failTask(String taskId, String failureNote) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) {
+            return false;
+        }
+
+        entry.setReviewNote(failureNote);
+        entry.setStatus(OpsTaskStatus.FAILED);
+        savePoolState();
+        return true;
+    }
+
+    public List<AdminTaskViewModel> buildAdminTaskViews() {
+        syncPoolStatusFromProfiles();
+
+        List<AdminTaskViewModel> views = new ArrayList<>();
+
+        for (OpsTaskPoolEntry entry : poolEntries.stream()
+                .filter(entry -> entry.getStatus() != OpsTaskStatus.ARCHIVED)
+                .sorted(Comparator.comparingLong(OpsTaskPoolEntry::getCreatedAtEpochMillis).reversed())
+                .toList()) {
+
+            String assigneeLabel = "Unassigned";
+            if (entry.getAssignedPlayerUuid() != null) {
+                assigneeLabel = entry.getAssignedPlayerUuid().toString();
+            } else if (entry.getStatus() == OpsTaskStatus.PUBLIC) {
+                assigneeLabel = "Public Pool";
+            } else if (entry.getPooledDivision() != null) {
+                assigneeLabel = entry.getPooledDivision().name();
+            }
+
+            String progressLabel = buildProgressLabel(entry);
+
+            views.add(new AdminTaskViewModel(
+                    entry.getTaskId(),
+                    entry.getDisplayName(),
+                    formatStatus(entry.getStatus()),
+                    assigneeLabel,
+                    entry.getDivision().name(),
+                    progressLabel,
+                    List.of(
+                            "Task ID: " + entry.getTaskId(),
+                            "Description: " + entry.getDescription(),
+                            "Objective: " + formatObjective(entry.getObjectiveType()),
+                            "Target: " + formatTarget(entry.getObjectiveType(), entry.getTargetId()),
+                            "Division: " + entry.getDivision().name(),
+                            "Reward: " + entry.getRewardPoints() + " rank points",
+                            "Status: " + formatStatus(entry.getStatus()),
+                            entry.getReviewNote() == null || entry.getReviewNote().isBlank()
+                                    ? "Review Note: None"
+                                    : "Review Note: " + entry.getReviewNote()
+                    )
+            ));
+        }
+
+        return views;
+    }
+
+    private void syncPoolStatusFromProfiles() {
+        boolean changed = false;
+
+        for (OpsTaskPoolEntry entry : poolEntries) {
+            if (entry.getStatus() == OpsTaskStatus.ARCHIVED) {
+                continue;
+            }
+
+            if (entry.getAssignedPlayerUuid() == null) {
+                continue;
+            }
+
+            PlayerProfile profile = profileManager.getLoadedProfile(entry.getAssignedPlayerUuid());
+            if (profile == null) {
+                continue;
+            }
+
+            Optional<ActiveTask> activeTask = findActiveTask(profile, entry.getTaskId());
+            if (activeTask.isPresent()) {
+                ActiveTask task = activeTask.get();
+                OpsTaskStatus newStatus;
+
+                if (task.isAwaitingOfficerApproval()) {
+                    newStatus = OpsTaskStatus.AWAITING_REVIEW;
+                } else if (task.getCurrentProgress() > 0) {
+                    newStatus = OpsTaskStatus.IN_PROGRESS;
+                } else {
+                    newStatus = OpsTaskStatus.ASSIGNED;
+                }
+
+                if (entry.getStatus() != newStatus) {
+                    entry.setStatus(newStatus);
+                    changed = true;
+                }
+                continue;
+            }
+
+            boolean completed = profile.getCompletedTasks().stream()
+                    .anyMatch(record -> record.getTemplateId().equals(entry.getTaskId()));
+
+            if (completed && entry.getStatus() != OpsTaskStatus.COMPLETED) {
+                entry.setStatus(OpsTaskStatus.COMPLETED);
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            savePoolState();
+        }
+    }
+
+    private String buildProgressLabel(OpsTaskPoolEntry entry) {
+        if (entry.getAssignedPlayerUuid() == null) {
+            return entry.getRequiredAmount() + " required";
+        }
+
+        PlayerProfile profile = profileManager.getLoadedProfile(entry.getAssignedPlayerUuid());
+        if (profile == null) {
+            return "0 / " + entry.getRequiredAmount();
+        }
+
+        Optional<ActiveTask> activeTask = findActiveTask(profile, entry.getTaskId());
+        if (activeTask.isPresent()) {
+            return activeTask.get().getCurrentProgress() + " / " + entry.getRequiredAmount();
+        }
+
+        boolean completed = profile.getCompletedTasks().stream()
+                .anyMatch(record -> record.getTemplateId().equals(entry.getTaskId()));
+
+        if (completed) {
+            return entry.getRequiredAmount() + " / " + entry.getRequiredAmount();
+        }
+
+        return "0 / " + entry.getRequiredAmount();
+    }
+
+    private Optional<OpsTaskPoolEntry> findPoolEntry(String taskId) {
+        return poolEntries.stream()
+                .filter(entry -> entry.getTaskId().equals(taskId))
+                .findFirst();
+    }
+
+    public TaskTemplate resolveTaskTemplate(String taskId) {
+        TaskTemplate registered = TaskRegistry.get(taskId);
+        if (registered != null) {
+            return registered;
+        }
+
+        OpsTaskPoolEntry poolEntry = findPoolEntry(taskId).orElse(null);
+        if (poolEntry == null) {
+            return null;
+        }
+
+        return new TaskTemplate(
+                poolEntry.getTaskId(),
+                poolEntry.getDisplayName(),
+                poolEntry.getDescription(),
+                poolEntry.getDivision(),
+                poolEntry.getObjectiveType(),
+                poolEntry.getTargetId(),
+                poolEntry.getRequiredAmount(),
+                poolEntry.getRewardPoints(),
+                poolEntry.isOfficerConfirmationRequired()
+        );
+    }
+
+    private String formatStatus(OpsTaskStatus status) {
+        return switch (status) {
+            case UNASSIGNED -> "UNASSIGNED";
+            case PUBLIC -> "PUBLIC";
+            case ASSIGNED -> "ASSIGNED";
+            case IN_PROGRESS -> "IN PROGRESS";
+            case AWAITING_REVIEW -> "AWAITING REVIEW";
+            case COMPLETED -> "COMPLETED";
+            case FAILED -> "FAILED";
+            case CANCELED -> "CANCELED";
+            case ARCHIVED -> "ARCHIVED";
+        };
+    }
+
+    private String formatObjective(TaskObjectiveType objectiveType) {
+        return switch (objectiveType) {
+            case BREAK_BLOCK -> "Break Block";
+            case COLLECT_ITEM -> "Collect Item";
+            case VISIT_LOCATION -> "Visit Location";
+            case MANUAL_CONFIRM -> "Manual Confirmation";
+        };
+    }
+
+    private String formatTarget(TaskObjectiveType objectiveType, String targetId) {
+        if (targetId == null || targetId.isBlank()) {
+            return "None";
+        }
+
+        return switch (objectiveType) {
+            case BREAK_BLOCK -> "Break " + targetId;
+            case COLLECT_ITEM -> "Collect " + targetId;
+            case VISIT_LOCATION -> "Visit " + targetId;
+            case MANUAL_CONFIRM -> targetId;
+        };
     }
 
     private void markTaskComplete(PlayerProfile profile, ActiveTask activeTask, TaskTemplate template) {
@@ -204,12 +596,13 @@ public class TaskService {
     }
 
     private void notifyPlayer(UUID playerId, String message) {
-        if (server == null) return;
+        if (server == null) {
+            return;
+        }
 
         ServerPlayerEntity player = server.getPlayerManager().getPlayer(playerId);
         if (player != null) {
             player.sendMessage(Text.literal(message), false);
         }
     }
-
 }

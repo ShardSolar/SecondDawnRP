@@ -39,7 +39,8 @@ public class TaskPadItem extends Item {
                             syncId,
                             playerInventory,
                             openingData.activeLines(),
-                            openingData.completedLines()
+                            openingData.completedLines(),
+                            openingData.activeTaskIds()
                     );
                 }
             });
