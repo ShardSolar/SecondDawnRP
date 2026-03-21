@@ -6,6 +6,7 @@ import net.minecraft.registry.Registry;
 import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.tasksystem.pad.OperationsPadItem;
 import net.shard.seconddawnrp.tasksystem.pad.TaskPadItem;
+import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalToolItem;
 
 public class ModItems {
 
@@ -14,6 +15,11 @@ public class ModItems {
 
     public static final Item OPERATIONS_PAD = register("operations_pad",
             new OperationsPadItem(new Item.Settings().maxCount(1)));
+
+    public static final Item TASK_TERMINAL_TOOL = register(
+            "task_terminal_tool",
+            new TaskTerminalToolItem(new Item.Settings().maxCount(1))
+    );
 
     private static Item register(String id, Item item) {
         return Registry.register(Registries.ITEM, SecondDawnRP.id(id), item);

@@ -40,6 +40,9 @@ import net.shard.seconddawnrp.tasksystem.service.TaskPermissionService;
 import net.shard.seconddawnrp.tasksystem.service.TaskRewardService;
 import net.shard.seconddawnrp.tasksystem.service.TaskService;
 import net.shard.seconddawnrp.tasksystem.network.ModNetworking;
+import net.shard.seconddawnrp.tasksystem.terminal.JsonTaskTerminalRepository;
+import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalManager;
+import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalRepository;
 
 import java.nio.file.Path;
 
@@ -55,6 +58,7 @@ public class SecondDawnRP implements ModInitializer {
     public static TaskRewardService TASK_REWARD_SERVICE;
     public static TaskService TASK_SERVICE;
     public static TaskPermissionService TASK_PERMISSION_SERVICE;
+    public static TaskTerminalManager TERMINAL_MANAGER;
 
     @Override
     public void onInitialize() {
@@ -179,7 +183,21 @@ public class SecondDawnRP implements ModInitializer {
                     throw new RuntimeException("Failed to close database manager", e);
                 }
             }
+
+
         });
+
+        JsonTaskTerminalRepository jsonTaskTerminalRepository = new JsonTaskTerminalRepository(configDir);
+        try {
+            jsonTaskTerminalRepository.init();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to initialize task terminal repository", e);
+        }
+        TaskTerminalRepository taskTerminalRepository = jsonTaskTerminalRepository;
+        TERMINAL_MANAGER = new TaskTerminalManager(taskTerminalRepository);
+
+
+
     }
 
     public static Identifier id(String path) {
