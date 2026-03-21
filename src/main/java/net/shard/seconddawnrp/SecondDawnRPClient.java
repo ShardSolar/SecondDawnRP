@@ -9,6 +9,7 @@ import net.shard.seconddawnrp.tasksystem.pad.AdminTaskScreenHandler;
 import net.shard.seconddawnrp.tasksystem.pad.AdminTaskViewModel;
 import net.shard.seconddawnrp.tasksystem.pad.OperationsPadScreen;
 import net.shard.seconddawnrp.tasksystem.pad.TaskPadScreen;
+import net.shard.seconddawnrp.tasksystem.terminal.TerminalScreen;
 
 import java.util.List;
 
@@ -18,6 +19,7 @@ public class SecondDawnRPClient implements ClientModInitializer {
     public void onInitializeClient() {
         HandledScreens.register(ModScreenHandlers.TASK_PAD_SCREEN, TaskPadScreen::new);
         HandledScreens.register(ModScreenHandlers.ADMIN_TASK_SCREEN, OperationsPadScreen::new);
+        HandledScreens.register(ModScreenHandlers.TERMINAL_SCREEN, TerminalScreen::new);
 
         ClientPlayNetworking.registerGlobalReceiver(
                 OpsPadRefreshS2CPacket.ID,

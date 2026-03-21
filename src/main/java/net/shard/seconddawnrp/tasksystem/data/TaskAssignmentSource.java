@@ -4,5 +4,6 @@ public enum TaskAssignmentSource {
     OFFICER,
     AUTO,
     ADMIN,
-    SYSTEM
+    SYSTEM,
+    SELF
 }

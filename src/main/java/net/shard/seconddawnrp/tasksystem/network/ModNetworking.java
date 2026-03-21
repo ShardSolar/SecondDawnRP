@@ -7,6 +7,9 @@ import net.minecraft.text.Text;
 import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.divison.Division;
 import net.shard.seconddawnrp.playerdata.PlayerProfile;
+import net.shard.seconddawnrp.tasksystem.data.OpsTaskStatus;
+import net.shard.seconddawnrp.tasksystem.data.TaskAssignmentSource;
+import net.shard.seconddawnrp.tasksystem.data.TaskTemplate;
 import net.shard.seconddawnrp.tasksystem.pad.AdminTaskViewModel;
 import net.shard.seconddawnrp.tasksystem.network.EditTaskC2SPacket;
 
@@ -73,6 +76,17 @@ public class ModNetworking {
                 EditTaskC2SPacket.ID,
                 (payload, context) -> context.player().server.execute(() ->
                         handleEditTask(context.player(), payload))
+        );
+
+        PayloadTypeRegistry.playC2S().register(
+                AcceptTerminalTaskC2SPacket.ID,
+                AcceptTerminalTaskC2SPacket.CODEC
+        );
+
+        ServerPlayNetworking.registerGlobalReceiver(
+                AcceptTerminalTaskC2SPacket.ID,
+                (payload, context) -> context.player().server.execute(() ->
+                        handleAcceptTerminalTask(context.player(), payload))
         );
     }
 
@@ -362,6 +376,48 @@ public class ModNetworking {
         } else {
             player.sendMessage(Text.literal("Task edit failed."), false);
         }
+    }
+
+    private static void handleAcceptTerminalTask(ServerPlayerEntity player, AcceptTerminalTaskC2SPacket packet) {
+        PlayerProfile profile = SecondDawnRP.PROFILE_MANAGER.getLoadedProfile(player.getUuid());
+        if (profile == null) {
+            player.sendMessage(Text.literal("Profile not loaded."), false);
+            return;
+        }
+
+        String taskId = packet.taskId();
+
+        // Validate still available
+        var poolEntry = SecondDawnRP.TASK_SERVICE.getPoolEntries().stream()
+                .filter(e -> e.getTaskId().equals(taskId))
+                .findFirst().orElse(null);
+
+        if (poolEntry == null
+                || (poolEntry.getStatus() != OpsTaskStatus.PUBLIC
+                && poolEntry.getStatus() != OpsTaskStatus.UNASSIGNED)) {
+            player.sendMessage(Text.literal("[Terminal] Task is no longer available."), false);
+            return;
+        }
+
+        if (SecondDawnRP.TASK_SERVICE.hasActiveTask(profile, taskId)) {
+            player.sendMessage(Text.literal("[Terminal] You already have this task."), false);
+            return;
+        }
+
+        boolean assigned = SecondDawnRP.TASK_SERVICE.assignTask(
+                profile, taskId, player.getUuid(), TaskAssignmentSource.SELF
+        );
+
+        if (!assigned) {
+            player.sendMessage(Text.literal("[Terminal] Could not accept task."), false);
+            return;
+        }
+
+        SecondDawnRP.TASK_SERVICE.linkPoolTaskToPlayer(taskId, profile);
+
+        TaskTemplate template = SecondDawnRP.TASK_SERVICE.resolveTaskTemplate(taskId);
+        String name = template != null ? template.getDisplayName() : taskId;
+        player.sendMessage(Text.literal("[Terminal] Task accepted: " + name), false);
     }
 
 }

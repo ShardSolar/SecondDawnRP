@@ -720,4 +720,19 @@ public class TaskService {
                 .findFirst();
     }
 
+    public boolean linkPoolTaskToPlayer(String taskId, PlayerProfile profile) {
+        OpsTaskPoolEntry entry = findPoolEntry(taskId).orElse(null);
+        if (entry == null) return false;
+
+        // Only update if the task is actually active for this player
+        if (!hasActiveTask(profile, taskId)) return false;
+
+        entry.setAssignedPlayerUuid(profile.getPlayerId());
+        entry.setAssignedByUuid(profile.getPlayerId());
+        entry.setPooledDivision(null);
+        entry.setStatus(OpsTaskStatus.ASSIGNED);
+        savePoolState();
+        return true;
+    }
+
 }

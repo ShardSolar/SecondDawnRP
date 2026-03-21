@@ -43,6 +43,7 @@ import net.shard.seconddawnrp.tasksystem.network.ModNetworking;
 import net.shard.seconddawnrp.tasksystem.terminal.JsonTaskTerminalRepository;
 import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalManager;
 import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalRepository;
+import net.shard.seconddawnrp.tasksystem.terminal.TerminalInteractListener;
 
 import java.nio.file.Path;
 
@@ -194,8 +195,8 @@ public class SecondDawnRP implements ModInitializer {
             throw new RuntimeException("Failed to initialize task terminal repository", e);
         }
         TaskTerminalRepository taskTerminalRepository = jsonTaskTerminalRepository;
-        TERMINAL_MANAGER = new TaskTerminalManager(taskTerminalRepository);
-
+        TERMINAL_MANAGER = new TaskTerminalManager(taskTerminalRepository, TASK_SERVICE, PROFILE_MANAGER);
+        new TerminalInteractListener(TERMINAL_MANAGER).register();
 
 
     }

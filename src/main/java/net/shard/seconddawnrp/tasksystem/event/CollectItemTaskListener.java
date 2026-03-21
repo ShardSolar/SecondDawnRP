@@ -1,11 +1,9 @@
 package net.shard.seconddawnrp.tasksystem.event;
 
-import net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents;
-import net.minecraft.block.BlockState;
-import net.minecraft.block.entity.BlockEntity;
+import net.fabricmc.fabric.api.event.player.PlayerPickupItemCallback;
+import net.minecraft.entity.ItemEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.util.math.BlockPos;
-import net.minecraft.world.World;
+import net.minecraft.item.ItemStack;
 import net.shard.seconddawnrp.playerdata.PlayerProfile;
 import net.shard.seconddawnrp.playerdata.PlayerProfileManager;
 import net.shard.seconddawnrp.tasksystem.data.ActiveTask;
@@ -16,23 +14,22 @@ import net.shard.seconddawnrp.tasksystem.util.TaskTargetMatcher;
 
 import java.util.List;
 
-public class BlockBreakTaskListener {
+public class CollectItemTaskListener {
 
     private final PlayerProfileManager profileManager;
     private final TaskService taskService;
 
-    public BlockBreakTaskListener(PlayerProfileManager profileManager, TaskService taskService) {
+    public CollectItemTaskListener(PlayerProfileManager profileManager, TaskService taskService) {
         this.profileManager = profileManager;
         this.taskService = taskService;
     }
 
     public void register() {
-        PlayerBlockBreakEvents.AFTER.register(this::onBlockBreak);
+        PlayerPickupItemCallback.EVENT.register(this::onItemPickup);
     }
 
-    private void onBlockBreak(World world, PlayerEntity player, BlockPos pos,
-                              BlockState state, BlockEntity blockEntity) {
-        if (world.isClient()) return;
+    private void onItemPickup(PlayerEntity player, ItemEntity itemEntity) {
+        if (player.getWorld().isClient()) return;
 
         PlayerProfile profile = profileManager.getLoadedProfile(player.getUuid());
         if (profile == null) return;
@@ -40,14 +37,17 @@ public class BlockBreakTaskListener {
         List<ActiveTask> activeTasks = profile.getActiveTasks();
         if (activeTasks.isEmpty()) return;
 
+        ItemStack stack = itemEntity.getStack();
+        int pickedUpCount = stack.getCount();
+
         for (ActiveTask activeTask : List.copyOf(activeTasks)) {
             TaskTemplate template = taskService.resolveTaskTemplate(activeTask.getTemplateId());
             if (template == null) continue;
-            if (template.getObjectiveType() != TaskObjectiveType.BREAK_BLOCK) continue;
+            if (template.getObjectiveType() != TaskObjectiveType.COLLECT_ITEM) continue;
             if (activeTask.isComplete()) continue;
 
-            if (TaskTargetMatcher.blockMatches(state.getBlock(), template.getTargetId())) {
-                taskService.incrementProgress(profile, template.getId(), 1);
+            if (TaskTargetMatcher.itemMatches(stack, template.getTargetId())) {
+                taskService.incrementProgress(profile, template.getId(), pickedUpCount);
             }
         }
     }

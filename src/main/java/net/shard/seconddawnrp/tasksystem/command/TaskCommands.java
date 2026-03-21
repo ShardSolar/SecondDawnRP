@@ -12,6 +12,8 @@ import net.shard.seconddawnrp.playerdata.PlayerProfile;
 import net.shard.seconddawnrp.playerdata.PlayerProfileManager;
 import net.shard.seconddawnrp.tasksystem.data.ActiveTask;
 import net.shard.seconddawnrp.tasksystem.data.CompletedTaskRecord;
+import net.shard.seconddawnrp.tasksystem.data.OpsTaskPoolEntry;
+import net.shard.seconddawnrp.tasksystem.data.OpsTaskStatus;
 import net.shard.seconddawnrp.tasksystem.data.TaskAssignmentSource;
 import net.shard.seconddawnrp.tasksystem.data.TaskTemplate;
 import net.shard.seconddawnrp.tasksystem.service.TaskService;
@@ -82,6 +84,85 @@ public final class TaskCommands {
                                             );
                                             return 1;
                                         }))))
+
+
+                .then(literal("accept")
+                        .then(argument("taskId", StringArgumentType.word())
+                                .executes(context -> {
+                                    ServerPlayerEntity self = getRequiredPlayer(context.getSource());
+                                    if (self == null) {
+                                        context.getSource().sendError(Text.literal("Only players can accept tasks."));
+                                        return 0;
+                                    }
+
+                                    String taskId = StringArgumentType.getString(context, "taskId");
+
+                                    PlayerProfile profile = profileManager.getOrLoadProfile(
+                                            self.getUuid(),
+                                            self.getName().getString()
+                                    );
+
+                                    TaskTemplate template = taskService.resolveTaskTemplate(taskId);
+                                    if (template == null) {
+                                        context.getSource().sendError(Text.literal("Unknown task: " + taskId));
+                                        return 0;
+                                    }
+
+                                    // Only allow self-accept for PUBLIC or UNASSIGNED pool tasks
+                                    OpsTaskPoolEntry poolEntry = taskService.getPoolEntries().stream()
+                                            .filter(e -> e.getTaskId().equals(taskId))
+                                            .findFirst()
+                                            .orElse(null);
+
+                                    if (poolEntry == null) {
+                                        context.getSource().sendError(Text.literal(
+                                                "Task '" + taskId + "' is not available for self-assignment."
+                                        ));
+                                        return 0;
+                                    }
+
+                                    if (poolEntry.getStatus() != OpsTaskStatus.PUBLIC
+                                            && poolEntry.getStatus() != OpsTaskStatus.UNASSIGNED) {
+                                        context.getSource().sendError(Text.literal(
+                                                "Task '" + taskId + "' is not currently available. Status: "
+                                                        + poolEntry.getStatus().name()
+                                        ));
+                                        return 0;
+                                    }
+
+                                    if (taskService.hasActiveTask(profile, taskId)) {
+                                        context.getSource().sendError(Text.literal("You already have this task active."));
+                                        return 0;
+                                    }
+
+                                    boolean alreadyCompleted = profile.getCompletedTasks().stream()
+                                            .anyMatch(r -> r.getTemplateId().equals(taskId));
+                                    if (alreadyCompleted) {
+                                        context.getSource().sendError(Text.literal("You have already completed this task."));
+                                        return 0;
+                                    }
+
+                                    boolean assigned = taskService.assignTask(
+                                            profile,
+                                            taskId,
+                                            self.getUuid(),
+                                            TaskAssignmentSource.SELF
+                                    );
+
+                                    if (!assigned) {
+                                        context.getSource().sendError(Text.literal("Could not accept task. Please try again."));
+                                        return 0;
+                                    }
+
+                                    // Link the pool entry to this player so Ops PADD can track and approve it
+                                    taskService.linkPoolTaskToPlayer(taskId, profile);
+
+                                    context.getSource().sendMessage(Text.literal(
+                                            "Task accepted: " + template.getDisplayName()
+                                                    + " — use /task progress to track it."
+                                    ));
+                                    return 1;
+                                })))
 
 
                 .then(literal("list")
@@ -176,6 +257,8 @@ public final class TaskCommands {
                                             );
                                             return 1;
                                         }))))
+
+
                 .then(literal("completed")
                         .executes(context -> {
                             ServerPlayerEntity self = getRequiredPlayer(context.getSource());
@@ -200,6 +283,7 @@ public final class TaskCommands {
                                     return sendCompletedTasks(context.getSource(), profileManager, taskService, targetPlayer);
                                 })))
 
+
                 .then(literal("history")
                         .executes(context -> {
                             ServerPlayerEntity self = getRequiredPlayer(context.getSource());
@@ -223,6 +307,7 @@ public final class TaskCommands {
 
                                     return sendCompletedTasks(context.getSource(), profileManager, taskService, targetPlayer);
                                 })))
+
 
                 .then(literal("debug")
                         .then(literal("advance")
@@ -296,11 +381,39 @@ public final class TaskCommands {
         );
     }
 
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
     private static PlayerProfile getLoadedActorProfile(ServerPlayerEntity player) {
-        if (player == null) {
+        if (player == null) return null;
+        return SecondDawnRP.PROFILE_MANAGER.getLoadedProfile(player.getUuid());
+    }
+
+    private static ServerPlayerEntity getOptionalPlayer(ServerCommandSource source) {
+        try {
+            return source.getPlayer();
+        } catch (Exception e) {
             return null;
         }
-        return SecondDawnRP.PROFILE_MANAGER.getLoadedProfile(player.getUuid());
+    }
+
+    private static ServerPlayerEntity getRequiredPlayer(ServerCommandSource source) {
+        try {
+            return source.getPlayer();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private static boolean canViewOther(ServerPlayerEntity sourcePlayer, PlayerProfile actorProfile, ServerPlayerEntity targetPlayer) {
+        if (sourcePlayer == null) return false;
+        if (sourcePlayer.getUuid().equals(targetPlayer.getUuid())) return true;
+        if (actorProfile == null) return false;
+
+        return SecondDawnRP.TASK_PERMISSION_SERVICE.canAssignTasks(sourcePlayer, actorProfile)
+                || SecondDawnRP.TASK_PERMISSION_SERVICE.canApproveTasks(sourcePlayer, actorProfile)
+                || SecondDawnRP.TASK_PERMISSION_SERVICE.canViewOpsPad(sourcePlayer, actorProfile);
     }
 
     private static int sendTaskList(ServerCommandSource source, PlayerProfileManager profileManager, TaskService taskService, ServerPlayerEntity targetPlayer) {
@@ -376,70 +489,6 @@ public final class TaskCommands {
         return 1;
     }
 
-    private static boolean canViewOther(ServerPlayerEntity sourcePlayer, PlayerProfile actorProfile, ServerPlayerEntity targetPlayer) {
-        if (sourcePlayer == null) {
-            return false;
-        }
-
-        if (sourcePlayer.getUuid().equals(targetPlayer.getUuid())) {
-            return true;
-        }
-
-        if (actorProfile == null) {
-            return false;
-        }
-
-        return SecondDawnRP.TASK_PERMISSION_SERVICE.canAssignTasks(sourcePlayer, actorProfile)
-                || SecondDawnRP.TASK_PERMISSION_SERVICE.canApproveTasks(sourcePlayer, actorProfile)
-                || SecondDawnRP.TASK_PERMISSION_SERVICE.canViewOpsPad(sourcePlayer, actorProfile);
-    }
-
-    private static ServerPlayerEntity getOptionalPlayer(ServerCommandSource source) {
-        try {
-            return source.getPlayer();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static ServerPlayerEntity getRequiredPlayer(ServerCommandSource source) {
-        try {
-            return source.getPlayer();
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private static String formatObjectiveType(TaskTemplate template) {
-        return switch (template.getObjectiveType()) {
-            case BREAK_BLOCK -> "Break Block";
-            case COLLECT_ITEM -> "Collect Item";
-            case VISIT_LOCATION -> "Visit Location";
-            case MANUAL_CONFIRM -> "Manual Confirmation";
-        };
-    }
-
-    private static String formatTarget(TaskTemplate template) {
-        String targetId = template.getTargetId();
-
-        if (targetId == null || targetId.isBlank()) {
-            return "None";
-        }
-
-        return switch (template.getObjectiveType()) {
-            case BREAK_BLOCK -> "Break " + targetId;
-            case COLLECT_ITEM -> "Collect " + targetId;
-            case VISIT_LOCATION -> "Visit " + targetId;
-            case MANUAL_CONFIRM -> "Officer approval required";
-        };
-    }
-
-    private static String formatTimestamp(long epochMillis) {
-        java.time.Instant instant = java.time.Instant.ofEpochMilli(epochMillis);
-        java.time.ZonedDateTime dateTime = instant.atZone(java.time.ZoneId.systemDefault());
-        return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(dateTime);
-    }
-
     private static int sendCompletedTasks(ServerCommandSource source, PlayerProfileManager profileManager, TaskService taskService, ServerPlayerEntity targetPlayer) {
         PlayerProfile profile = profileManager.getOrLoadProfile(
                 targetPlayer.getUuid(),
@@ -468,5 +517,32 @@ public final class TaskCommands {
         }
 
         return 1;
+    }
+
+    private static String formatObjectiveType(TaskTemplate template) {
+        return switch (template.getObjectiveType()) {
+            case BREAK_BLOCK -> "Break Block";
+            case COLLECT_ITEM -> "Collect Item";
+            case VISIT_LOCATION -> "Visit Location";
+            case MANUAL_CONFIRM -> "Manual Confirmation";
+        };
+    }
+
+    private static String formatTarget(TaskTemplate template) {
+        String targetId = template.getTargetId();
+        if (targetId == null || targetId.isBlank()) return "None";
+
+        return switch (template.getObjectiveType()) {
+            case BREAK_BLOCK -> "Break " + targetId;
+            case COLLECT_ITEM -> "Collect " + targetId;
+            case VISIT_LOCATION -> "Visit " + targetId;
+            case MANUAL_CONFIRM -> "Officer approval required";
+        };
+    }
+
+    private static String formatTimestamp(long epochMillis) {
+        java.time.Instant instant = java.time.Instant.ofEpochMilli(epochMillis);
+        java.time.ZonedDateTime dateTime = instant.atZone(java.time.ZoneId.systemDefault());
+        return java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss").format(dateTime);
     }
 }

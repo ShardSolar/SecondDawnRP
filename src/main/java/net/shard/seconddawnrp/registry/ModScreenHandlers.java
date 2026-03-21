@@ -9,6 +9,8 @@ import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.tasksystem.pad.AdminTaskScreenHandler;
 import net.shard.seconddawnrp.tasksystem.pad.TaskPadOpeningData;
 import net.shard.seconddawnrp.tasksystem.pad.TaskPadScreenHandler;
+import net.shard.seconddawnrp.tasksystem.terminal.TerminalScreenHandler;
+import net.shard.seconddawnrp.tasksystem.terminal.TerminalScreenOpenData;
 
 public class ModScreenHandlers {
 
@@ -24,6 +26,13 @@ public class ModScreenHandlers {
                     Registries.SCREEN_HANDLER,
                     SecondDawnRP.id("operations_pad"),
                     new ScreenHandlerType<>(AdminTaskScreenHandler::new, FeatureFlags.VANILLA_FEATURES)
+            );
+
+    public static final ScreenHandlerType<TerminalScreenHandler> TERMINAL_SCREEN =
+            Registry.register(
+                    Registries.SCREEN_HANDLER,
+                    SecondDawnRP.id("terminal"),
+                    new ExtendedScreenHandlerType<>(TerminalScreenHandler::new, TerminalScreenOpenData.PACKET_CODEC)
             );
 
     public static void register() {
