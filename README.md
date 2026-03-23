@@ -12,12 +12,12 @@ The following items and blocks need textures or custom models before Phase 5 can
 
 | Item ID | Description | Notes |
 |---|---|---|
-| `engineering_pad` | Engineering division PADD | Already exists — amber/orange theme |
-| `component_registration_tool` | GM tool for registering components | Screwdriver or tricorder style |
+| `engineering_pad` | Engineering division Pad | Already exists — amber/orange theme |
+| `component_registration_tool` | GM tool for registering components | Screwdriver or scanner style |
 | `warp_core_tool` | GM tool for warp core configuration | Phase 5 |
-| `fuel_rod` | Matter/antimatter fuel rod item | Glowing green or blue rod |
-| `antimatter_pod` | Antimatter containment pod | Small canister, warning markings |
-| `dilithium_crystal` | Dilithium crystal item | Faceted crystal, purple/white |
+| `fuel_rod` | Primary fuel rod item | Glowing green or blue rod |
+| `containment_cell` | Exotic fuel containment cell | Small canister, warning markings |
+| `resonance_coil` | Reaction field alignment coil | Toroidal coil, copper/amber windings |
 
 ### Blocks (full block models + textures unless noted)
 
@@ -27,9 +27,9 @@ The following items and blocks need textures or custom models before Phase 5 can
 | `warp_core_injector` | Injector block — top/bottom of the multiblock | Has a nozzle/port face |
 | `warp_core_column` | Central glowing column block | Animated texture — cycles blue→white at full power, red at fault |
 | `warp_core_controller` | Control interface block — the "brain" of the multiblock | Screen face with readouts |
-| `plasma_conduit` | Horizontal/vertical conduit block | Connected texture preferred, pipe-style |
-| ` eps_relay` | EPS relay junction block | Small panel-mounted block |
-| `deuterium_tank` | Deuterium storage tank block | Cylindrical appearance, blue tint |
+| `conduit` | Horizontal/vertical conduit block | Connected texture preferred, pipe-style |
+| `power_relay` | Power relay junction block | Small panel-mounted block |
+| `fuel_tank` | Primary fuel storage tank block | Cylindrical appearance, blue tint |
 
 ### GUI Textures (512×256 PNG atlas unless noted)
 
@@ -46,7 +46,7 @@ Second Dawn RP is a roleplay engine — a suite of interconnected systems that t
 
 **Platform:** Minecraft Java 1.21.1 — Fabric
 **Mod ID:** `seconddawnrp`
-**Setting:** Original IP — Star Trek inspired universe
+**Setting:** Original science fiction universe
 **Crew capacity:** 300 players aboard a single vessel
 
 ---
@@ -111,7 +111,7 @@ CREATE → ASSIGN → ACCEPT → IN_PROGRESS → AWAITING_REVIEW → COMPLETED
 | `BREAK_BLOCK` | Block break event | `minecraft:block_id` |
 | `COLLECT_ITEM` | Inventory delta (per tick) | `minecraft:item_id` |
 | `VISIT_LOCATION` | Position check (every 20 ticks) | `x,y,z` or `x,y,z,radius` |
-| `MANUAL_CONFIRM` | Player PADD submit button | Any descriptive string |
+| `MANUAL_CONFIRM` | Player Pad submit button | Any descriptive string |
 
 ### Task ID Generation
 Task IDs are auto-generated server-side from the display name — GMs do not set IDs manually. `Break Stone` → `break_stone`. Collisions auto-suffix: `break_stone_2`.
@@ -273,7 +273,7 @@ Components are registered in-world by GMs using the **Component Registration Too
 
 Registration is a two-step chat flow: type a display name, then a repair item ID with optional count (e.g. `minecraft:iron_ingot 2`) or `default` for the global default.
 
-### Engineering PAD
+### Engineering Pad
 
 | Interaction | Action |
 |---|---|
@@ -326,9 +326,9 @@ The `ComponentIntegrityChecker` runs every 5 ticks. If a registered block is fou
 
 | Item | ID | Purpose |
 |---|---|---|
-| Task PADD | `task_pad` | Player mission display |
-| Operations PADD | `operations_pad` | Officer task management |
-| Engineering PADD | `engineering_pad` | Engineering component overview |
+| Task Pad | `task_pad` | Player mission display |
+| Operations Pad | `operations_pad` | Officer task management |
+| Engineering Pad | `engineering_pad` | Engineering component overview |
 | Task Terminal Tool | `task_terminal_tool` | Admin terminal registration |
 | Component Registration Tool | `component_registration_tool` | GM component registration |
 | Spawn Block Config Tool | `spawn_block_config_tool` | GM encounter editor |
@@ -366,7 +366,7 @@ The `ComponentIntegrityChecker` runs every 5 ticks. If a registered block is fou
 
 | Node | Purpose |
 |---|---|
-| `st.task.create` | Create tasks via Ops PADD |
+| `st.task.create` | Create tasks via Ops Pad |
 | `st.task.assign` | Assign tasks to players/divisions |
 | `st.task.publish` | Publish tasks to public pool |
 | `st.task.approve` | Approve manual confirm tasks |
@@ -374,7 +374,7 @@ The `ComponentIntegrityChecker` runs every 5 ticks. If a registered block is fou
 | `st.task.fail` | Fail tasks |
 | `st.task.cancel` | Cancel tasks |
 | `st.task.edit` | Edit existing pool tasks |
-| `st.task.ops` | Open Ops PADD |
+| `st.task.ops` | Open Ops Pad |
 | `st.gm.use` | General GM tool access |
 | `st.gm.spawnblock` | Configure spawn blocks |
 | `st.gm.trigger` | Trigger events |
@@ -503,10 +503,10 @@ src/main/resources/data/seconddawnrp/
 
 | Phase | Status | Description |
 |---|---|---|
-| 1 — Core gameplay | ✅ Complete | Profiles, divisions, full task system, PADDs, terminals, triggers, textures |
+| 1 — Core gameplay | ✅ Complete | Profiles, divisions, full task system, Pads, terminals, triggers, textures |
 | 2 — SQL persistence | ✅ Complete | All repositories migrated to SQLite, JSON kept as backup |
 | 3 — GM event system | ✅ Complete | Spawn blocks, spawn item, encounter templates, skills, keybindings, natural death prevention |
-| 4 — Engineering degradation | ✅ Complete | Component registration tool, health drain, auto tasks, repair with item consumption, explosion handling, Engineering PAD |
+| 4 — Engineering degradation | ✅ Complete | Component registration tool, health drain, auto tasks, repair with item consumption, explosion handling, Engineering Pad |
 | 5 — Warp core | 🔨 In Progress | M/ARA multiblock, reactor states, fuel system, fault events |
 | 6 — Medical systems | 📋 Planned | Injury system, downed state, gurney, tricorder, treatment tools |
 | 7 — Security systems | 📋 Planned | Camera network, sensor network, alert system, containment |
