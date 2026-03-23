@@ -1,17 +1,53 @@
 # Second Dawn RP
 
-A custom Fabric mod for Minecraft 1.21.1 implementing a persistent science fiction roleplay operating system. Players crew a single ship or station, organized into divisions with ranks, driven by a task-based gameplay loop, live GM events, and an engineering maintenance system.
+A custom Fabric mod for Minecraft 1.21.1 implementing a persistent science fiction roleplay operating system. Players crew a single ship or station, organized into divisions with ranks, driven by a task-based gameplay loop, live GM events, an engineering maintenance system, and a warp core reactor.
+
+---
+
+## Asset Requests for Phase 5 (Warp Core)
+
+The following items and blocks need textures or custom models before Phase 5 can be fully deployed. Pass this list to your modeller.
+
+### Items (16×16 PNG textures)
+
+| Item ID | Description | Notes |
+|---|---|---|
+| `engineering_pad` | Engineering division PADD | Already exists — amber/orange theme |
+| `component_registration_tool` | GM tool for registering components | Screwdriver or tricorder style |
+| `warp_core_tool` | GM tool for warp core configuration | Phase 5 |
+| `fuel_rod` | Matter/antimatter fuel rod item | Glowing green or blue rod |
+| `antimatter_pod` | Antimatter containment pod | Small canister, warning markings |
+| `dilithium_crystal` | Dilithium crystal item | Faceted crystal, purple/white |
+
+### Blocks (full block models + textures unless noted)
+
+| Block ID | Description | Notes |
+|---|---|---|
+| `warp_core_casing` | Standard casing block for the M/ARA multiblock | Dark metal, amber trim |
+| `warp_core_injector` | Injector block — top/bottom of the multiblock | Has a nozzle/port face |
+| `warp_core_column` | Central glowing column block | Animated texture — cycles blue→white at full power, red at fault |
+| `warp_core_controller` | Control interface block — the "brain" of the multiblock | Screen face with readouts |
+| `plasma_conduit` | Horizontal/vertical conduit block | Connected texture preferred, pipe-style |
+| ` eps_relay` | EPS relay junction block | Small panel-mounted block |
+| `deuterium_tank` | Deuterium storage tank block | Cylindrical appearance, blue tint |
+
+### GUI Textures (512×256 PNG atlas unless noted)
+
+| File | Description | Notes |
+|---|---|---|
+| `warp_core_monitor.png` | Warp core status screen — reactor state, power output, fuel levels | Amber/orange theme matching engineering PAD |
+| `fuel_management.png` | Fuel rod insertion/removal interface | |
 
 ---
 
 ## Overview
 
-Second Dawn RP is a roleplay engine — a suite of interconnected systems that turn a Minecraft server into a persistent sci-fi crew simulation. The mod handles player profiles, division assignments, rank progression, task creation and tracking, in-world terminals, GM event tools with full skill systems, and engineering maintenance — all wired together through a strict layered architecture.
+Second Dawn RP is a roleplay engine — a suite of interconnected systems that turn a Minecraft server into a persistent sci-fi crew simulation. The mod handles player profiles, division assignments, rank progression, task creation and tracking, in-world terminals, GM event tools with full skill systems, engineering maintenance, and a warp core reactor system — all wired together through a strict layered architecture.
 
-**Platform:** Minecraft Java 1.21.1 — Fabric  
-**Mod ID:** `seconddawnrp`  
-**Setting:** Original IP — Star Trek inspired universe  
-**Crew capacity:** 300 players aboard a single vessel  
+**Platform:** Minecraft Java 1.21.1 — Fabric
+**Mod ID:** `seconddawnrp`
+**Setting:** Original IP — Star Trek inspired universe
+**Crew capacity:** 300 players aboard a single vessel
 
 ---
 
@@ -43,6 +79,7 @@ Storage (JSON or SQLite)
 | `PERMISSION_SERVICE` | `PermissionService` | LuckPerms wrapper |
 | `GM_EVENT_SERVICE` | `GmEventService` | GM event lifecycle, skill ticks, mob tracking |
 | `GM_PERMISSION_SERVICE` | `GmPermissionService` | Permission checks for GM operations |
+| `DEGRADATION_SERVICE` | `DegradationService` | Component health, drain, repair, integrity checks |
 
 ---
 
@@ -184,8 +221,6 @@ Location: `run/config/assets/seconddawnrp/encounter_templates.json`
 
 ### GM Skills
 
-Skills are stored in `statusEffects` with the prefix `skill:`. They can be combined freely.
-
 | Skill Key | Trigger | Effect |
 |---|---|---|
 | `skill:WEAKNESS_AOE` | Every 2s (passive) | Pulses Weakness I to players within 6 blocks |
@@ -196,12 +231,6 @@ Skills are stored in `statusEffects` with the prefix `skill:`. They can be combi
 | `skill:SHIELD_ALLIES` | Every 1s (passive) | Pulses Resistance I to nearby event mobs within 8 blocks |
 | `skill:TELEPORT_BEHIND` | On hit | Teleports mob behind its attacker |
 | `skill:SUMMON_ADDS` | On death | Spawns 2 silverfish at death location |
-
-### Vanilla Effects in Templates
-
-Format: `"minecraft:effect_name:amplitude"` where amplitude is 1 or 2.
-
-Examples: `"minecraft:strength:1"`, `"minecraft:speed:2"`, `"minecraft:resistance:1"`
 
 ### Natural Death Prevention
 
@@ -217,7 +246,79 @@ Global config: `run/config/assets/seconddawnrp/gmevent_config.json`
 }
 ```
 
-Per-template overrides can be set in the encounter template JSON using the same field names. `null` means use global default.
+---
+
+## Engineering Degradation System
+
+### Overview
+
+Components are registered in-world by GMs using the **Component Registration Tool**. Each component degrades over time and can be damaged by explosions and combat. Engineering players repair components using required items.
+
+### Component States
+
+| Status | Health Range | Drain Rate | Effect |
+|---|---|---|---|
+| NOMINAL | 76–100 | 1 HP/tick | None |
+| DEGRADED | 51–75 | 2 HP/tick | Particle warnings pulse every 60s |
+| CRITICAL | 26–50 | 3 HP/tick | Particles every 20s, repair task auto-generated |
+| OFFLINE | 0–25 | 3 HP/tick | Heavy smoke, all actions locked |
+
+### Component Registration Tool
+
+| Interaction | Action |
+|---|---|
+| Sneak + right-click unregistered block | Begin registration (name → repair item) |
+| Right-click registered block | Inspect status |
+| Sneak + right-click registered block | Remove registration |
+
+Registration is a two-step chat flow: type a display name, then a repair item ID with optional count (e.g. `minecraft:iron_ingot 2`) or `default` for the global default.
+
+### Engineering PAD
+
+| Interaction | Action |
+|---|---|
+| Right-click in air | Open component overview screen |
+| Right-click registered block | Inspect status |
+| Sneak + right-click registered block | Repair (consumes required items) |
+
+### Repair System
+
+Each component has a required repair item and count, configurable per component or falling back to the global default in `degradation_config.json`. The player must hold the correct item in their main hand. Items are consumed on repair.
+
+### Engineering Commands
+
+```
+/engineering list
+/engineering remove <id>
+/engineering sethealth <id> <value>
+/engineering setrepair <id> <item_id> [count]
+/engineering clearrepair <id>
+/engineering save
+```
+
+### Configuration
+
+`config/assets/seconddawnrp/degradation_config.json`
+
+```json
+{
+  "drainIntervalMs": 300000,
+  "drainPerTickNominal": 1,
+  "drainPerTickDegraded": 2,
+  "drainPerTickCritical": 3,
+  "taskGenerationCooldownMs": 1800000,
+  "healthPerRepair": 20,
+  "warningRadiusBlocks": 16,
+  "warningPulseTicksDegraded": 1200,
+  "warningPulseTicksCritical": 400,
+  "defaultRepairItemId": "minecraft:iron_ingot",
+  "defaultRepairItemCount": 1
+}
+```
+
+### Explosion and Integrity Handling
+
+The `ComponentIntegrityChecker` runs every 5 ticks. If a registered block is found to be air (destroyed by explosion, /setblock, or any external cause), the component takes 100 damage and is auto-unregistered. On server start, any components whose world no longer exists are purged automatically.
 
 ---
 
@@ -227,7 +328,9 @@ Per-template overrides can be set in the encounter template JSON using the same 
 |---|---|---|
 | Task PADD | `task_pad` | Player mission display |
 | Operations PADD | `operations_pad` | Officer task management |
+| Engineering PADD | `engineering_pad` | Engineering component overview |
 | Task Terminal Tool | `task_terminal_tool` | Admin terminal registration |
+| Component Registration Tool | `component_registration_tool` | GM component registration |
 | Spawn Block Config Tool | `spawn_block_config_tool` | GM encounter editor |
 | Spawn Item Tool | `spawn_item_tool` | GM quick-fire spawner |
 
@@ -242,11 +345,12 @@ Per-template overrides can be set in the encounter template JSON using the same 
 | Completed tasks | SQLite | `player_completed_tasks` table |
 | Ops task pool | SQLite | `ops_task_pool` table |
 | Task terminals | SQLite | `task_terminals` table |
+| Components | JSON | `config/assets/seconddawnrp/components.json` |
 | Task templates | JSON (read-only) | `data/seconddawnrp/tasks/` |
 | Encounter templates | JSON | `config/assets/seconddawnrp/encounter_templates.json` |
 | Spawn blocks | JSON | `config/assets/seconddawnrp/spawn_blocks.json` |
 | GM event config | JSON | `config/assets/seconddawnrp/gmevent_config.json` |
-| JSON backups | JSON | `config/assets/seconddawnrp/` |
+| Degradation config | JSON | `config/assets/seconddawnrp/degradation_config.json` |
 
 ### Schema Version History
 
@@ -254,6 +358,7 @@ Per-template overrides can be set in the encounter template JSON using the same 
 |---|---|
 | 1 | players, player_billets, player_certifications, player_active_tasks, player_completed_tasks |
 | 2 | ops_task_pool, task_terminals |
+| 3 | components |
 
 ---
 
@@ -275,8 +380,7 @@ Per-template overrides can be set in the encounter template JSON using the same 
 | `st.gm.trigger` | Trigger events |
 | `st.gm.stop` | Stop events |
 | `st.gm.templates` | Save/manage encounter templates |
-
-All permissions fall back to rank-based checks if LuckPerms node is not set.
+| `st.engineering.admin` | Register/remove components, engineering admin commands |
 
 ---
 
@@ -290,7 +394,7 @@ net.shard.seconddawnrp
 │   ├── DatabaseManager                SQLite connection (auto-reconnect)
 │   ├── DatabaseConfig                 JDBC URL builder
 │   ├── DatabaseBootstrap              Runs migrations on startup
-│   └── DatabaseMigrations             Versioned schema migrations (v1, v2)
+│   └── DatabaseMigrations             Versioned schema migrations (v1, v2, v3)
 ├── divison/
 │   └── Division                       Enum: COMMAND, OPERATIONS, ENGINEERING,
 │                                            SCIENCE, MEDICAL, SECURITY
@@ -346,6 +450,19 @@ net.shard.seconddawnrp
 │   │               SpawnItemScreen, SpawnItemScreenHandler,
 │   │               SpawnItemScreenOpenData, SpawnItemScreenHandlerFactory
 │   └── service/    GmEventService, GmPermissionService, GmSkillHandler
+├── degradation/
+│   ├── client/     ComponentWarningClientHandler
+│   ├── command/    EngineeringCommands
+│   ├── data/       ComponentEntry, ComponentStatus, DegradationConfig
+│   ├── event/      ComponentInteractListener, ComponentNamingChatListener,
+│   │               ComponentDamageListener, ComponentBlockBreakListener
+│   ├── item/       EngineeringPadItem, ComponentRegistrationTool
+│   ├── network/    ComponentWarningS2CPacket, OpenEngineeringPadS2CPacket,
+│   │               DegradationNetworking
+│   ├── repository/ ComponentRepository, JsonComponentRepository,
+│   │               SqlComponentRepository, DegradationConfigRepository
+│   ├── screen/     EngineeringPadScreen
+│   └── service/    DegradationService, ComponentIntegrityChecker
 └── registry/
     ├── ModItems
     └── ModScreenHandlers
@@ -358,23 +475,26 @@ net.shard.seconddawnrp
 ```
 src/main/resources/assets/seconddawnrp/
 ├── textures/gui/
-│   ├── task_pad.png               Player PADD (380×190 in 512×256)
-│   ├── operations_pad.png         Ops PADD (420×210 in 512×256)
-│   ├── terminal.png               Terminal GUI
-│   ├── spawn_block_config_gui.png Spawn Config GUI (420×210 in 512×256)
-│   └── spawn_item_gui.png         Spawn Item GUI (380×190 in 512×256)
+│   ├── task_pad.png
+│   ├── operations_pad.png
+│   ├── engineering_pad.png
+│   ├── terminal.png
+│   ├── spawn_block_config_gui.png
+│   └── spawn_item_gui.png
 └── textures/item/
-    ├── task_pad.json
-    ├── operations_pad.json
+    ├── task_pad.png
+    ├── operations_pad.png
+    ├── engineering_pad.png
     ├── task_terminal_tool.png
+    ├── component_registration_tool.png
     ├── spawn_block_config_tool.png
     └── spawn_item_tool.png
 
 src/main/resources/assets/seconddawnrp/lang/
-└── en_us.json                     Keybinding labels
+└── en_us.json
 
 src/main/resources/data/seconddawnrp/
-└── tasks/                         Static task template JSON files
+└── tasks/
 ```
 
 ---
@@ -386,8 +506,8 @@ src/main/resources/data/seconddawnrp/
 | 1 — Core gameplay | ✅ Complete | Profiles, divisions, full task system, PADDs, terminals, triggers, textures |
 | 2 — SQL persistence | ✅ Complete | All repositories migrated to SQLite, JSON kept as backup |
 | 3 — GM event system | ✅ Complete | Spawn blocks, spawn item, encounter templates, skills, keybindings, natural death prevention |
-| 4 — Engineering degradation | 📋 Planned | Component marking, health drain, auto tasks, repair interaction |
-| 5 — Warp core | 📋 Planned | M/ARA multiblock, reactor states, fuel system, fault events |
+| 4 — Engineering degradation | ✅ Complete | Component registration tool, health drain, auto tasks, repair with item consumption, explosion handling, Engineering PAD |
+| 5 — Warp core | 🔨 In Progress | M/ARA multiblock, reactor states, fuel system, fault events |
 | 6 — Medical systems | 📋 Planned | Injury system, downed state, gurney, tricorder, treatment tools |
 | 7 — Security systems | 📋 Planned | Camera network, sensor network, alert system, containment |
 | 8 — Science & polish | 🔮 Future | Research terminals, anomaly system, rank progression, certifications |
@@ -409,6 +529,7 @@ src/main/resources/data/seconddawnrp/
 - Task approval requires assigned player to be online.
 - Timed spawn mode uses overworld as fallback — stored event origin position is a planned V2 improvement.
 - `onMobHit` skills (KNOCKBACK_STRIKE, TELEPORT_BEHIND) require `GmMobHitListener` to be registered.
+- Component registration tool naming flow suppresses chat messages — players in naming mode cannot send public chat until they complete or cancel registration.
 
 ---
 
