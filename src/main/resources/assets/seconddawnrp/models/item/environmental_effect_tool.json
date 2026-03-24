@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/generated",
+  "textures": {
+    "layer0": "seconddawnrp:item/environmental_effect_tool"
+  }
+}

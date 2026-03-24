@@ -6,6 +6,11 @@
   "item.seconddawnrp.task_pad": "Task Pad",
   "item.seconddawnrp.operations_pad": "Operations Task Pad",
   "item.seconddawnrp.component_registration_tool": "Component Registration Tool",
+  "item.seconddawnrp.trigger_tool": "Trigger Tool",
+  "item.seconddawnrp.environmental_effect_tool": "Environmental Effact Tool",
+
+
+
 
   "item.seconddawnrp.warp_core_tool":   "Warp Core Tool",
   "item.seconddawnrp.fuel_rod":         "Fuel Rod",

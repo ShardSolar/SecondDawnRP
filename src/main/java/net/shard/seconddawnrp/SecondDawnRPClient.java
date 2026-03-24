@@ -32,6 +32,9 @@ public class SecondDawnRPClient implements ClientModInitializer {
         HandledScreens.register(ModScreenHandlers.SPAWN_ITEM_SCREEN, SpawnItemScreen::new);
         ComponentWarningClientHandler.register();
         WarpCoreClientHandler.register();
+        net.shard.seconddawnrp.gmevent.client.EnvEffectClientHandler.register();
+        net.shard.seconddawnrp.gmevent.client.TriggerClientHandler.register();
+
         // GM keybindings
         GmKeybindings.register();
         GmKeyInputHandler.register();
