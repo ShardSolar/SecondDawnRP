@@ -33,6 +33,7 @@ import net.shard.seconddawnrp.degradation.network.DegradationNetworking;
 import net.shard.seconddawnrp.degradation.repository.DegradationConfigRepository;
 import net.shard.seconddawnrp.degradation.repository.JsonComponentRepository;
 import net.shard.seconddawnrp.degradation.service.DegradationService;
+import net.shard.seconddawnrp.gmevent.command.GmAnomalyCommands;
 import net.shard.seconddawnrp.gmevent.command.GmEnvCommands;
 import net.shard.seconddawnrp.gmevent.command.GmEventCommands;
 import net.shard.seconddawnrp.gmevent.command.GmTriggerCommands;
@@ -42,11 +43,7 @@ import net.shard.seconddawnrp.gmevent.event.GmDamageListener;
 import net.shard.seconddawnrp.gmevent.event.GmMobHitListener;
 import net.shard.seconddawnrp.gmevent.event.MobDeathEventListener;
 import net.shard.seconddawnrp.gmevent.network.GmEventNetworking;
-import net.shard.seconddawnrp.gmevent.repository.GmEventConfigRepository;
-import net.shard.seconddawnrp.gmevent.repository.JsonEncounterTemplateRepository;
-import net.shard.seconddawnrp.gmevent.repository.JsonEnvironmentalEffectRepository;
-import net.shard.seconddawnrp.gmevent.repository.JsonSpawnBlockRepository;
-import net.shard.seconddawnrp.gmevent.repository.JsonTriggerRepository;
+import net.shard.seconddawnrp.gmevent.repository.*;
 import net.shard.seconddawnrp.gmevent.service.*;
 import net.shard.seconddawnrp.playerdata.DefaultProfileFactory;
 import net.shard.seconddawnrp.playerdata.LuckPermsGroupMapper;
@@ -112,6 +109,8 @@ public class SecondDawnRP implements ModInitializer {
     public static EnvironmentalEffectService ENV_EFFECT_SERVICE;
     public static TriggerService TRIGGER_SERVICE;
     public static GmRegistryService GM_REGISTRY_SERVICE;
+    public static AnomalyService ANOMALY_SERVICE;
+    public static GmToolVisibilityService GM_TOOL_VISIBILITY_SERVICE;
 
     @Override
     public void onInitialize() {
@@ -139,6 +138,7 @@ public class SecondDawnRP implements ModInitializer {
             entries.add(Item.fromBlock(ModBlocks.CONDUIT));
             entries.add(Item.fromBlock(ModBlocks.POWER_RELAY));
             entries.add(Item.fromBlock(ModBlocks.FUEL_TANK));
+            entries.add(ModItems.ANOMALY_MARKER_TOOL);
         });
 
         ItemGroup SecondDawnRP = Registry.register(
@@ -167,6 +167,7 @@ public class SecondDawnRP implements ModInitializer {
                             entries.add(Item.fromBlock(ModBlocks.CONDUIT));
                             entries.add(Item.fromBlock(ModBlocks.POWER_RELAY));
                             entries.add(Item.fromBlock(ModBlocks.FUEL_TANK));
+                            entries.add(ModItems.ANOMALY_MARKER_TOOL);
 
 
 
@@ -308,6 +309,16 @@ public class SecondDawnRP implements ModInitializer {
         catch (Exception e) { throw new RuntimeException("Failed to initialize trigger repository", e); }
         TRIGGER_SERVICE = new TriggerService(triggerRepo);
 
+        // Anomaly Marker System
+        JsonAnomalyRepository anomalyRepo = new JsonAnomalyRepository(configDir);
+        try { anomalyRepo.init(); }
+        catch (Exception e) { throw new RuntimeException("Failed to initialize anomaly repository", e); }
+        ANOMALY_SERVICE = new AnomalyService(anomalyRepo);
+        GM_TOOL_VISIBILITY_SERVICE = new GmToolVisibilityService();
+
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
+                GmAnomalyCommands.register(dispatcher, registryAccess, environment));
+
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 GmTriggerCommands.register(dispatcher, registryAccess, environment));
 
@@ -329,7 +340,13 @@ public class SecondDawnRP implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> WARP_CORE_SERVICE.tick(server));
         ServerTickEvents.END_SERVER_TICK.register(server -> ENV_EFFECT_SERVICE.tick(server));
         ServerTickEvents.END_SERVER_TICK.register(server -> TRIGGER_SERVICE.tick(server));
-
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            // Poll every 10 ticks to detect tool equip changes
+            if (server.getTicks() % 10 != 0) return;
+            for (var player : server.getPlayerManager().getPlayerList()) {
+                GM_TOOL_VISIBILITY_SERVICE.onEquip(player, player.getMainHandStack());
+            }
+        });
         // Server started - single unified handler
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             try {
@@ -359,6 +376,7 @@ public class SecondDawnRP implements ModInitializer {
             ENV_EFFECT_SERVICE.reload();
             GM_REGISTRY_SERVICE.reload();
             TRIGGER_SERVICE.reload();
+            ANOMALY_SERVICE.reload();
         });
 
         // Player join
@@ -390,9 +408,14 @@ public class SecondDawnRP implements ModInitializer {
             TRIGGER_SERVICE.saveAll();
             DEGRADATION_SERVICE.saveAll();
             PROFILE_MANAGER.saveAll();
+            ANOMALY_SERVICE.saveAll();
+
             if (DATABASE_MANAGER != null) {
-                try { DATABASE_MANAGER.close(); }
-                catch (Exception e) { throw new RuntimeException("Failed to close database manager", e); }
+                try {
+                    DATABASE_MANAGER.close();
+                } catch (Exception e) {
+                    throw new RuntimeException("Failed to close database manager", e);
+                }
             }
         });
     }

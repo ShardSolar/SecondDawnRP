@@ -34,6 +34,7 @@ public class SecondDawnRPClient implements ClientModInitializer {
         WarpCoreClientHandler.register();
         net.shard.seconddawnrp.gmevent.client.EnvEffectClientHandler.register();
         net.shard.seconddawnrp.gmevent.client.TriggerClientHandler.register();
+        net.shard.seconddawnrp.gmevent.client.ToolVisibilityClientHandler.register();
 
         // GM keybindings
         GmKeybindings.register();

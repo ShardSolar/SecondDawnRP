@@ -5,7 +5,10 @@ public enum Division {
     OPERATIONS("operations"),
     ENGINEERING("engineering"),
     SCIENCE("science"),
-    UNASSIGNED("unassigned");
+    UNASSIGNED("unassigned"),
+    SECURITY("security"),
+    MEDICAL("medical");
+
 
     private final String id;
 

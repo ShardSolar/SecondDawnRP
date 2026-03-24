@@ -28,6 +28,9 @@ public final class GmEventNetworking {
 
         // Env C2S
         PayloadTypeRegistry.playC2S().register(SaveEnvConfigC2SPacket.ID, SaveEnvConfigC2SPacket.CODEC);
+
+        PayloadTypeRegistry.playS2C().register(ToolVisibilityS2CPacket.ID,
+                ToolVisibilityS2CPacket.CODEC);
     }
 
     public static void registerServerReceivers() {
@@ -69,5 +72,8 @@ public final class GmEventNetworking {
                     SecondDawnRP.ENV_EFFECT_SERVICE.saveEntry(entry);
                 })
         );
+
+
+
     }
 }
