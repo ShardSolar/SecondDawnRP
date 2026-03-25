@@ -73,10 +73,19 @@ public final class ModBlocks {
                     .sounds(BlockSoundGroup.METAL)
                     .requiresTool()));
 
+    public static final Block CHARACTER_CREATION_TERMINAL = register("character_creation_terminal",
+            new net.shard.seconddawnrp.character.CharacterCreationTerminalBlock(
+                    AbstractBlock.Settings.create()
+                            .mapColor(MapColor.CYAN)
+                            .strength(3.0f, 6.0f)
+                            .sounds(BlockSoundGroup.METAL)
+                            .requiresTool()));
+
     // ── Block entity types ────────────────────────────────────────────────────
 
     public static BlockEntityType<WarpCoreControllerBlockEntity> WARP_CORE_CONTROLLER_ENTITY;
-
+    public static BlockEntityType<net.shard.seconddawnrp.character.CharacterCreationTerminalBlock
+            .CharacterCreationTerminalBlockEntity> CHARACTER_CREATION_TERMINAL_ENTITY;
     // ── Registration ──────────────────────────────────────────────────────────
 
     public static void register() {
@@ -90,6 +99,19 @@ public final class ModBlocks {
                         WARP_CORE_CONTROLLER).build()
         );
 
+        CHARACTER_CREATION_TERMINAL_ENTITY = Registry.register(
+                Registries.BLOCK_ENTITY_TYPE,
+                Identifier.of(SecondDawnRP.MOD_ID, "character_creation_terminal"),
+                BlockEntityType.Builder.create(
+                        (pos, state) ->
+                                new net.shard.seconddawnrp.character.CharacterCreationTerminalBlock
+                                        .CharacterCreationTerminalBlockEntity(pos, state),
+                        CHARACTER_CREATION_TERMINAL).build()
+        );
+
+        net.shard.seconddawnrp.character.CharacterCreationTerminalBlock
+                .CharacterCreationTerminalBlockEntity.TYPE = CHARACTER_CREATION_TERMINAL_ENTITY;
+
         // Set the static TYPE reference — used by the no-arg convenience constructor
         WarpCoreControllerBlockEntity.TYPE = WARP_CORE_CONTROLLER_ENTITY;
 
@@ -98,6 +120,8 @@ public final class ModBlocks {
                 (blockEntity, direction) -> blockEntity.energyStorage,
                 WARP_CORE_CONTROLLER_ENTITY
         );
+
+
     }
 
     // ── Helper ────────────────────────────────────────────────────────────────

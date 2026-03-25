@@ -8,7 +8,7 @@ import java.sql.Statement;
 
 public final class DatabaseMigrations {
 
-    public static final int CURRENT_SCHEMA_VERSION = 3;
+    public static final int CURRENT_SCHEMA_VERSION = 4;
 
     public void migrate(Connection connection) throws SQLException {
         createSchemaVersionTableIfMissing(connection);
@@ -33,6 +33,12 @@ public final class DatabaseMigrations {
             currentVersion = 3;
         }
 
+        if (currentVersion < 4) {
+            applyVersion4(connection);
+            setSchemaVersion(connection, 4);
+            currentVersion = 4;
+        }
+
         if (currentVersion > CURRENT_SCHEMA_VERSION) {
             throw new SQLException(
                     "Database schema version " + currentVersion
@@ -40,6 +46,8 @@ public final class DatabaseMigrations {
             );
         }
     }
+
+    // ── Schema version bookkeeping ────────────────────────────────────────────
 
     private void createSchemaVersionTableIfMissing(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
@@ -71,6 +79,8 @@ public final class DatabaseMigrations {
             insert.executeUpdate();
         }
     }
+
+    // ── V1: core player + task tables ─────────────────────────────────────────
 
     private void applyVersion1(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
@@ -127,10 +137,10 @@ public final class DatabaseMigrations {
         }
     }
 
+    // ── V2: ops pool + terminals ──────────────────────────────────────────────
+
     private void applyVersion2(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
-
-            // Ops task pool
             statement.execute(
                     "CREATE TABLE IF NOT EXISTS ops_task_pool ("
                             + "task_id TEXT PRIMARY KEY, "
@@ -151,8 +161,6 @@ public final class DatabaseMigrations {
                             + "review_note TEXT"
                             + ")"
             );
-
-            // Task terminals
             statement.execute(
                     "CREATE TABLE IF NOT EXISTS task_terminals ("
                             + "world_key TEXT NOT NULL, "
@@ -164,6 +172,8 @@ public final class DatabaseMigrations {
             );
         }
     }
+
+    // ── V3: degradation components ────────────────────────────────────────────
 
     private void applyVersion3(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
@@ -186,6 +196,80 @@ public final class DatabaseMigrations {
             statement.execute(
                     "CREATE UNIQUE INDEX IF NOT EXISTS idx_components_position "
                             + "ON components (world_key, block_pos_long)"
+            );
+        }
+    }
+
+    // ── V4: character profiles ────────────────────────────────────────────────
+
+    private void applyVersion4(Connection connection) throws SQLException {
+        try (Statement statement = connection.createStatement()) {
+
+            // Core character record — one per player account
+            statement.execute(
+                    "CREATE TABLE IF NOT EXISTS character_profiles ("
+                            + "character_id TEXT PRIMARY KEY, "          // own UUID, not player UUID
+                            + "player_uuid TEXT NOT NULL, "              // Minecraft account link
+                            + "character_name TEXT NOT NULL, "
+                            + "species TEXT, "                           // null until set at creation
+                            + "bio TEXT, "
+                            + "status TEXT NOT NULL, "                   // CharacterStatus enum name
+                            + "universal_translator INTEGER NOT NULL DEFAULT 0, "
+                            + "permadeath_consent INTEGER NOT NULL DEFAULT 0, "
+                            + "active_long_term_injury_id TEXT, "        // null = no current LTI
+                            + "deceased_at INTEGER, "                    // null = alive
+                            + "progression_transfer INTEGER NOT NULL DEFAULT 0, "
+                            + "created_at INTEGER NOT NULL"
+                            + ")"
+            );
+            // Index on player_uuid — we always look up by Minecraft account
+            statement.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_character_profiles_player_uuid "
+                            + "ON character_profiles (player_uuid)"
+            );
+
+            // Per-character language knowledge
+            statement.execute(
+                    "CREATE TABLE IF NOT EXISTS character_known_languages ("
+                            + "character_id TEXT NOT NULL, "
+                            + "language_id TEXT NOT NULL, "
+                            + "PRIMARY KEY (character_id, language_id)"
+                            + ")"
+            );
+
+            // Long-term injuries — stored separately so Medical can query them
+            statement.execute(
+                    "CREATE TABLE IF NOT EXISTS long_term_injuries ("
+                            + "injury_id TEXT PRIMARY KEY, "
+                            + "player_uuid TEXT NOT NULL, "
+                            + "tier TEXT NOT NULL, "                     // LongTermInjuryTier enum name
+                            + "applied_at_ms INTEGER NOT NULL, "
+                            + "expires_at_ms INTEGER NOT NULL, "         // absolute expiry timestamp
+                            + "sessions_completed INTEGER NOT NULL DEFAULT 0, "
+                            + "last_treatment_ms INTEGER NOT NULL DEFAULT 0, "
+                            + "active INTEGER NOT NULL DEFAULT 1"        // 0 = cleared/expired
+                            + ")"
+            );
+            statement.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_lti_player "
+                            + "ON long_term_injuries (player_uuid)"
+            );
+
+            // RDM flags — append-only audit entries for GM review
+            statement.execute(
+                    "CREATE TABLE IF NOT EXISTS rdm_flags ("
+                            + "flag_id TEXT PRIMARY KEY, "
+                            + "attacker_uuid TEXT NOT NULL, "
+                            + "victim_uuid TEXT NOT NULL, "
+                            + "world_key TEXT NOT NULL, "
+                            + "block_pos_long INTEGER NOT NULL, "
+                            + "flagged_at_ms INTEGER NOT NULL, "
+                            + "event_active INTEGER NOT NULL DEFAULT 0, " // was a GM event running?
+                            + "last_security_interaction_ms INTEGER NOT NULL DEFAULT 0, "
+                            + "reviewed INTEGER NOT NULL DEFAULT 0, "     // 0=pending, 1=confirmed, 2=dismissed
+                            + "reviewed_by_uuid TEXT, "
+                            + "reviewed_at_ms INTEGER"
+                            + ")"
             );
         }
     }

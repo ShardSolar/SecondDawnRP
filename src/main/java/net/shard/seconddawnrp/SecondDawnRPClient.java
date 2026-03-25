@@ -3,6 +3,7 @@ package net.shard.seconddawnrp;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
+import net.shard.seconddawnrp.character.CharacterCreationClientHandler;
 import net.shard.seconddawnrp.degradation.client.ComponentWarningClientHandler;
 import net.shard.seconddawnrp.gmevent.client.AnomalyClientHandler;
 import net.shard.seconddawnrp.gmevent.client.GmKeybindings;
@@ -37,6 +38,7 @@ public class SecondDawnRPClient implements ClientModInitializer {
         net.shard.seconddawnrp.gmevent.client.TriggerClientHandler.register();
         net.shard.seconddawnrp.gmevent.client.ToolVisibilityClientHandler.register();
         AnomalyClientHandler.register();
+        CharacterCreationClientHandler.register();
         ComponentWarningClientHandler.registerLocateReceiver();
         // GM keybindings
         GmKeybindings.register();
