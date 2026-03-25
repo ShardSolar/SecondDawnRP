@@ -263,22 +263,28 @@ public class EngineeringPadScreen extends Screen {
                 ctx.drawText(textRenderer, Text.literal(pct),
                         barEnd+3, ry+3, barTextCol(snap.status()), false);
 
-                // hover tooltip with coordinates
+                // hover tooltip with coordinates and repair info
                 if (mx >= x+PAD && mx <= x+W-PAD && my >= ry && my <= ry+ROW_H) {
                     net.minecraft.util.math.BlockPos bpos =
                             net.minecraft.util.math.BlockPos.fromLong(snap.blockPosLong());
-                    ctx.drawTooltip(textRenderer, List.of(
-                            Text.literal(snap.displayName()).formatted(Formatting.WHITE),
-                            Text.literal(snap.status().name())
-                                    .formatted(statusFmt(snap.status())),
-                            Text.literal("Pos: " + bpos.getX() + ", " + bpos.getY() + ", " + bpos.getZ())
-                                    .formatted(Formatting.GRAY),
-                            Text.literal(snap.worldKey()).formatted(Formatting.DARK_GRAY),
-                            Text.literal("ID: " + snap.componentId())
-                                    .formatted(Formatting.DARK_GRAY),
-                            Text.literal("/engineering locate " + snap.componentId())
-                                    .formatted(Formatting.DARK_GRAY)
-                    ), mx, my);
+
+                    var lines = new java.util.ArrayList<net.minecraft.text.Text>();
+                    lines.add(Text.literal(snap.displayName()).formatted(Formatting.WHITE));
+                    lines.add(Text.literal(snap.status().name()).formatted(statusFmt(snap.status())));
+                    lines.add(Text.literal("Health: " + snap.health() + "/100").formatted(Formatting.GRAY));
+                    lines.add(Text.literal("Pos: " + bpos.getX() + ", " + bpos.getY() + ", " + bpos.getZ())
+                            .formatted(Formatting.GRAY));
+                    // Repair item
+                    if (snap.repairItemId() != null && !snap.repairItemId().isEmpty()) {
+                        String itemName = snap.repairItemId().contains(":")
+                                ? snap.repairItemId().split(":")[1].replace("_", " ")
+                                : snap.repairItemId().replace("_", " ");
+                        lines.add(Text.literal("Repair: " + snap.repairItemCount() + "x " + itemName)
+                                .formatted(Formatting.AQUA));
+                    }
+                    lines.add(Text.literal("/engineering locate " + snap.componentId())
+                            .formatted(Formatting.DARK_GRAY));
+                    ctx.drawTooltip(textRenderer, lines, mx, my);
                 }
             }
 

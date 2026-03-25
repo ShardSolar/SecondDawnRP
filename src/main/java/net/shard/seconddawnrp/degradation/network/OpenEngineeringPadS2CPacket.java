@@ -41,7 +41,9 @@ public record OpenEngineeringPadS2CPacket(
             String worldKey,
             long blockPosLong,
             int health,
-            ComponentStatus status
+            ComponentStatus status,
+            String repairItemId,
+            int repairItemCount
     ) {}
 
     /** Lightweight view of a warp core for Engineering Pad display. */
@@ -66,6 +68,8 @@ public record OpenEngineeringPadS2CPacket(
                         buf.writeLong(value.blockPosLong());
                         buf.writeInt(value.health());
                         buf.writeString(value.status().name());
+                        buf.writeString(value.repairItemId() != null ? value.repairItemId() : "");
+                        buf.writeInt(value.repairItemCount());
                     },
                     buf -> new ComponentSnapshot(
                             buf.readString(),
@@ -73,7 +77,9 @@ public record OpenEngineeringPadS2CPacket(
                             buf.readString(),
                             buf.readLong(),
                             buf.readInt(),
-                            ComponentStatus.valueOf(buf.readString())
+                            ComponentStatus.valueOf(buf.readString()),
+                            buf.readString(),
+                            buf.readInt()
                     )
             );
 
@@ -145,13 +151,22 @@ public record OpenEngineeringPadS2CPacket(
     public static OpenEngineeringPadS2CPacket fromService(DegradationService service) {
         List<ComponentSnapshot> snapshots = new ArrayList<>();
         for (ComponentEntry entry : service.getAllComponents()) {
+            // Resolve effective repair item — fall back to config default
+            String repairId = entry.getRepairItemId() != null && !entry.getRepairItemId().isEmpty()
+                    ? entry.getRepairItemId()
+                    : service.getConfig().getDefaultRepairItemId();
+            int repairCount = entry.getRepairItemCount() > 0
+                    ? entry.getRepairItemCount()
+                    : service.getConfig().getDefaultRepairItemCount();
             snapshots.add(new ComponentSnapshot(
                     entry.getComponentId(),
                     entry.getDisplayName(),
                     entry.getWorldKey(),
                     entry.getBlockPosLong(),
                     entry.getHealth(),
-                    entry.getStatus()
+                    entry.getStatus(),
+                    repairId,
+                    repairCount
             ));
         }
         snapshots.sort(Comparator

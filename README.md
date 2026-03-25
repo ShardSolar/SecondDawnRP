@@ -1,541 +1,160 @@
-# Second Dawn RP
-
-A custom Fabric mod for Minecraft 1.21.1 implementing a persistent science fiction roleplay operating system. Players crew a single ship or station, organized into divisions with ranks, driven by a task-based gameplay loop, live GM events, an engineering maintenance system, and a warp core reactor.
-
----
-
-## Asset Requests for Phase 5 (Warp Core)
-
-The following items and blocks need textures or custom models before Phase 5 can be fully deployed. Pass this list to your modeller.
-
-### Items (16×16 PNG textures)
-
-| Item ID | Description | Notes |
-|---|---|---|
-| `engineering_pad` | Engineering division Pad | Already exists — amber/orange theme |
-| `component_registration_tool` | GM tool for registering components | Screwdriver or scanner style |
-| `warp_core_tool` | GM tool for warp core configuration | Phase 5 |
-| `fuel_rod` | Primary fuel rod item | Glowing green or blue rod |
-| `containment_cell` | Exotic fuel containment cell | Small canister, warning markings |
-| `resonance_coil` | Reaction field alignment coil | Toroidal coil, copper/amber windings |
-
-### Blocks (full block models + textures unless noted)
-
-| Block ID | Description | Notes |
-|---|---|---|
-| `warp_core_casing` | Standard casing block for the M/ARA multiblock | Dark metal, amber trim |
-| `warp_core_injector` | Injector block — top/bottom of the multiblock | Has a nozzle/port face |
-| `warp_core_column` | Central glowing column block | Animated texture — cycles blue→white at full power, red at fault |
-| `warp_core_controller` | Control interface block — the "brain" of the multiblock | Screen face with readouts |
-| `conduit` | Horizontal/vertical conduit block | Connected texture preferred, pipe-style |
-| `power_relay` | Power relay junction block | Small panel-mounted block |
-| `fuel_tank` | Primary fuel storage tank block | Cylindrical appearance, blue tint |
-
-### GUI Textures (512×256 PNG atlas unless noted)
-
-| File | Description | Notes |
-|---|---|---|
-| `warp_core_monitor.png` | Warp core status screen — reactor state, power output, fuel levels | Amber/orange theme matching engineering PAD |
-| `fuel_management.png` | Fuel rod insertion/removal interface | |
-
----
-
-## Overview
-
-Second Dawn RP is a roleplay engine — a suite of interconnected systems that turn a Minecraft server into a persistent sci-fi crew simulation. The mod handles player profiles, division assignments, rank progression, task creation and tracking, in-world terminals, GM event tools with full skill systems, engineering maintenance, and a warp core reactor system — all wired together through a strict layered architecture.
-
-**Platform:** Minecraft Java 1.21.1 — Fabric
-**Mod ID:** `seconddawnrp`
-**Setting:** Original science fiction universe
-**Crew capacity:** 300 players aboard a single vessel
-
----
-
-## Architecture
-
-All systems follow a strict layered contract. No layer may skip a level.
-
-```
-UI / Commands / Events
-        ↓
-    Services
-        ↓
-  Repositories
-        ↓
-Storage (JSON or SQLite)
-```
-
-### Core Singletons (`SecondDawnRP.java`)
-
-| Field | Type | Purpose |
-|---|---|---|
-| `PROFILE_MANAGER` | `PlayerProfileManager` | Load, cache, save player profiles |
-| `PROFILE_SERVICE` | `PlayerProfileService` | Profile lifecycle + LuckPerms sync |
-| `TASK_SERVICE` | `TaskService` | Full task lifecycle |
-| `TASK_REWARD_SERVICE` | `TaskRewardService` | Grant rank points on completion |
-| `TASK_PERMISSION_SERVICE` | `TaskPermissionService` | Permission checks for task operations |
-| `TERMINAL_MANAGER` | `TaskTerminalManager` | Terminal registration and interaction |
-| `DATABASE_MANAGER` | `DatabaseManager` | SQLite connection (auto-reconnect) |
-| `PERMISSION_SERVICE` | `PermissionService` | LuckPerms wrapper |
-| `GM_EVENT_SERVICE` | `GmEventService` | GM event lifecycle, skill ticks, mob tracking |
-| `GM_PERMISSION_SERVICE` | `GmPermissionService` | Permission checks for GM operations |
-| `DEGRADATION_SERVICE` | `DegradationService` | Component health, drain, repair, integrity checks |
-
----
-
-## Divisions
-
-| Division | Identity | Primary Loop |
-|---|---|---|
-| Command | Leadership, diplomacy | Direct crew, approve tasks, manage events |
-| Operations | Logistics, coordination | Create/assign tasks, manage pool |
-| Engineering | Ship systems, maintenance | Monitor reactor, repair components |
-| Medical | Crew survival | Scan, diagnose, treat, follow-up care |
-| Science | Research, exploration | Investigate anomalies, run experiments |
-| Security | Awareness, threat response | Monitor cameras, scan, respond to threats |
-
----
-
-## Task System
-
-### Lifecycle
-```
-CREATE → ASSIGN → ACCEPT → IN_PROGRESS → AWAITING_REVIEW → COMPLETED
-                                       ↘ FAILED / CANCELED / RETURNED
-```
-
-### Objective Types
-
-| Type | Trigger | Target Format |
-|---|---|---|
-| `BREAK_BLOCK` | Block break event | `minecraft:block_id` |
-| `COLLECT_ITEM` | Inventory delta (per tick) | `minecraft:item_id` |
-| `VISIT_LOCATION` | Position check (every 20 ticks) | `x,y,z` or `x,y,z,radius` |
-| `MANUAL_CONFIRM` | Player Pad submit button | Any descriptive string |
-
-### Task ID Generation
-Task IDs are auto-generated server-side from the display name — GMs do not set IDs manually. `Break Stone` → `break_stone`. Collisions auto-suffix: `break_stone_2`.
-
-### Commands
-```
-/task assign <player> <taskId>
-/task accept <taskId>
-/task list [player]
-/task progress [player]
-/task approve <player> <taskId>
-/task completed [player]
-/task history [player]
-/task debug advance <player> <id> <n>
-```
-
-### Task Terminals
-
-World blocks registered by admin using the **Task Terminal Tool**. Right-click to open Terminal GUI.
-
-| Type | Shows |
-|---|---|
-| `PUBLIC_BOARD` | Tasks with status `PUBLIC` |
-| `DIVISION_BOARD` | `UNASSIGNED` tasks filtered by division |
-
-**Terminal Tool Controls:**
-- Right-click air — cycle terminal type
-- Sneak + right-click air — cycle division filter
-- Right-click block — register terminal
-- Sneak + right-click block — remove terminal
-
----
-
-## GM Event System
-
-### Items
-
-| Item | Purpose |
-|---|---|
-| `spawn_block_config_tool` | Full template editor, anchored to a world block |
-| `spawn_item_tool` | Read-only quick-fire spawner |
-
-### Spawn Block Config Tool Workflow
-1. Right-click air to cycle and select a template
-2. Right-click a block — registers it with the selected template, opens Config GUI
-3. In GUI: edit mob, HP, armor, count, behaviour, effects/skills, linked task
-4. Click **SAVE TEMPLATE** — saves edits permanently to JSON
-5. Click **ACTIVATE SPAWN** — triggers event at that block position
-6. Sneak + right-click block — removes registration
-
-### Spawn Item Tool Workflow
-1. Right-click — opens read-only GUI showing template list and selected template stats
-2. Select a template from the list
-3. Close GUI
-4. Hold tool, aim at location, press **G** — spawns encounter at crosshair
-5. Press **H** — despawns all active event mobs
-
-### Keybindings
-Configurable in Options → Controls → **Second Dawn RP — GM Tools**
-
-| Key | Default | Action |
-|---|---|---|
-| GM Spawn | G | Spawns selected template at crosshair (Spawn Item Tool must be in main hand) |
-| GM Despawn All | H | Despawns all active event mobs |
-
-### Spawn Behaviours
-
-| Behaviour | Effect |
-|---|---|
-| `INSTANT` | All mobs spawn at once within radius |
-| `TIMED` | Mobs trickle in on interval until total reached |
-| `ON_ACTIVATE` | Waits for manual GM activation |
-
-### GM Commands
-```
-/gmevent templates
-/gmevent spawn <templateId>
-/gmevent spawnlinked <templateId> <taskId>
-/gmevent list
-/gmevent stop <eventId>
-/gmevent stopall
-```
-
-### Encounter Templates (JSON)
-
-Location: `run/config/assets/seconddawnrp/encounter_templates.json`
-
-```json
-[
-  {
-    "id": "boarding_party",
-    "displayName": "Boarding Party",
-    "mobTypeId": "minecraft:zombie",
-    "maxHealth": 40.0,
-    "armor": 10.0,
-    "totalSpawnCount": 6,
-    "maxActiveAtOnce": 3,
-    "spawnRadiusBlocks": 8,
-    "spawnIntervalTicks": 60,
-    "spawnBehaviour": "TIMED",
-    "statusEffects": ["skill:WEAKNESS_AOE", "minecraft:strength:1"],
-    "heldItems": [],
-    "drops": []
-  }
-]
-```
-
-### GM Skills
-
-| Skill Key | Trigger | Effect |
-|---|---|---|
-| `skill:WEAKNESS_AOE` | Every 2s (passive) | Pulses Weakness I to players within 6 blocks |
-| `skill:KNOCKBACK_STRIKE` | On hit | Extra knockback on every attack |
-| `skill:REGENERATION` | Every 2s (passive) | Restores 1 HP per tick cycle |
-| `skill:FIRE_AURA` | Every 1s (passive) | Sets players within 4 blocks on fire for 3s |
-| `skill:ENRAGE` | Continuous check | Speed II + Strength II when below 50% HP |
-| `skill:SHIELD_ALLIES` | Every 1s (passive) | Pulses Resistance I to nearby event mobs within 8 blocks |
-| `skill:TELEPORT_BEHIND` | On hit | Teleports mob behind its attacker |
-| `skill:SUMMON_ADDS` | On death | Spawns 2 silverfish at death location |
-
-### Natural Death Prevention
-
-Global config: `run/config/assets/seconddawnrp/gmevent_config.json`
-
-```json
-{
-  "preventSunlightDamage": true,
-  "preventNaturalDespawn": true,
-  "preventSuffocation": false,
-  "preventDrowning": false,
-  "preventFallDamage": false
-}
-```
-
----
-
-## Engineering Degradation System
-
-### Overview
-
-Components are registered in-world by GMs using the **Component Registration Tool**. Each component degrades over time and can be damaged by explosions and combat. Engineering players repair components using required items.
-
-### Component States
-
-| Status | Health Range | Drain Rate | Effect |
-|---|---|---|---|
-| NOMINAL | 76–100 | 1 HP/tick | None |
-| DEGRADED | 51–75 | 2 HP/tick | Particle warnings pulse every 60s |
-| CRITICAL | 26–50 | 3 HP/tick | Particles every 20s, repair task auto-generated |
-| OFFLINE | 0–25 | 3 HP/tick | Heavy smoke, all actions locked |
-
-### Component Registration Tool
-
-| Interaction | Action |
-|---|---|
-| Sneak + right-click unregistered block | Begin registration (name → repair item) |
-| Right-click registered block | Inspect status |
-| Sneak + right-click registered block | Remove registration |
-
-Registration is a two-step chat flow: type a display name, then a repair item ID with optional count (e.g. `minecraft:iron_ingot 2`) or `default` for the global default.
-
-### Engineering Pad
-
-| Interaction | Action |
-|---|---|
-| Right-click in air | Open component overview screen |
-| Right-click registered block | Inspect status |
-| Sneak + right-click registered block | Repair (consumes required items) |
-
-### Repair System
-
-Each component has a required repair item and count, configurable per component or falling back to the global default in `degradation_config.json`. The player must hold the correct item in their main hand. Items are consumed on repair.
-
-### Engineering Commands
-
-```
-/engineering list
-/engineering remove <id>
-/engineering sethealth <id> <value>
-/engineering setrepair <id> <item_id> [count]
-/engineering clearrepair <id>
-/engineering save
-```
-
-### Configuration
-
-`config/assets/seconddawnrp/degradation_config.json`
-
-```json
-{
-  "drainIntervalMs": 300000,
-  "drainPerTickNominal": 1,
-  "drainPerTickDegraded": 2,
-  "drainPerTickCritical": 3,
-  "taskGenerationCooldownMs": 1800000,
-  "healthPerRepair": 20,
-  "warningRadiusBlocks": 16,
-  "warningPulseTicksDegraded": 1200,
-  "warningPulseTicksCritical": 400,
-  "defaultRepairItemId": "minecraft:iron_ingot",
-  "defaultRepairItemCount": 1
-}
-```
-
-### Explosion and Integrity Handling
-
-The `ComponentIntegrityChecker` runs every 5 ticks. If a registered block is found to be air (destroyed by explosion, /setblock, or any external cause), the component takes 100 damage and is auto-unregistered. On server start, any components whose world no longer exists are purged automatically.
-
----
-
-## Items
-
-| Item | ID | Purpose |
-|---|---|---|
-| Task Pad | `task_pad` | Player mission display |
-| Operations Pad | `operations_pad` | Officer task management |
-| Engineering Pad | `engineering_pad` | Engineering component overview |
-| Task Terminal Tool | `task_terminal_tool` | Admin terminal registration |
-| Component Registration Tool | `component_registration_tool` | GM component registration |
-| Spawn Block Config Tool | `spawn_block_config_tool` | GM encounter editor |
-| Spawn Item Tool | `spawn_item_tool` | GM quick-fire spawner |
-
----
-
-## Storage
-
-| Data | Backend | Location |
-|---|---|---|
-| Player profiles | SQLite | `config/seconddawnrp/seconddawnrp.db` → `players` |
-| Active tasks | SQLite | `player_active_tasks` table |
-| Completed tasks | SQLite | `player_completed_tasks` table |
-| Ops task pool | SQLite | `ops_task_pool` table |
-| Task terminals | SQLite | `task_terminals` table |
-| Components | JSON | `config/assets/seconddawnrp/components.json` |
-| Task templates | JSON (read-only) | `data/seconddawnrp/tasks/` |
-| Encounter templates | JSON | `config/assets/seconddawnrp/encounter_templates.json` |
-| Spawn blocks | JSON | `config/assets/seconddawnrp/spawn_blocks.json` |
-| GM event config | JSON | `config/assets/seconddawnrp/gmevent_config.json` |
-| Degradation config | JSON | `config/assets/seconddawnrp/degradation_config.json` |
-
-### Schema Version History
-
-| Version | Changes |
-|---|---|
-| 1 | players, player_billets, player_certifications, player_active_tasks, player_completed_tasks |
-| 2 | ops_task_pool, task_terminals |
-| 3 | components |
-
----
-
-## Permissions (LuckPerms Nodes)
-
-| Node | Purpose |
-|---|---|
-| `st.task.create` | Create tasks via Ops Pad |
-| `st.task.assign` | Assign tasks to players/divisions |
-| `st.task.publish` | Publish tasks to public pool |
-| `st.task.approve` | Approve manual confirm tasks |
-| `st.task.review` | Return tasks for revision |
-| `st.task.fail` | Fail tasks |
-| `st.task.cancel` | Cancel tasks |
-| `st.task.edit` | Edit existing pool tasks |
-| `st.task.ops` | Open Ops Pad |
-| `st.gm.use` | General GM tool access |
-| `st.gm.spawnblock` | Configure spawn blocks |
-| `st.gm.trigger` | Trigger events |
-| `st.gm.stop` | Stop events |
-| `st.gm.templates` | Save/manage encounter templates |
-| `st.engineering.admin` | Register/remove components, engineering admin commands |
-
----
-
-## Package Structure
-
-```
-net.shard.seconddawnrp
-├── SecondDawnRP.java                  Mod initializer, static singletons
-├── SecondDawnRPClient.java            Client screen + keybinding registration
-├── database/
-│   ├── DatabaseManager                SQLite connection (auto-reconnect)
-│   ├── DatabaseConfig                 JDBC URL builder
-│   ├── DatabaseBootstrap              Runs migrations on startup
-│   └── DatabaseMigrations             Versioned schema migrations (v1, v2, v3)
-├── divison/
-│   └── Division                       Enum: COMMAND, OPERATIONS, ENGINEERING,
-│                                            SCIENCE, MEDICAL, SECURITY
-├── playerdata/
-│   ├── PlayerProfile
-│   ├── PlayerProfileManager
-│   ├── PlayerProfileService
-│   ├── LuckPermsSyncService
-│   ├── PermissionService
-│   └── persistence/
-│       ├── ProfileRepository
-│       └── SqlProfileRepository
-├── tasksystem/
-│   ├── command/    TaskCommands
-│   ├── data/       ActiveTask, CompletedTaskRecord, OpsTaskPoolEntry,
-│   │               TaskTemplate, TaskObjectiveType, OpsTaskStatus,
-│   │               TaskAssignmentSource
-│   ├── event/      TaskEventRegistrar, BlockBreakTaskListener,
-│   │               CollectItemTaskListener, VisitLocationTaskListener
-│   ├── loader/     TaskJsonLoader
-│   ├── network/    ModNetworking, CreateTaskC2SPacket, AssignTaskC2SPacket,
-│   │               ReviewTaskActionC2SPacket, AcceptTerminalTaskC2SPacket,
-│   │               OpsPadRefreshS2CPacket, EditTaskC2SPacket,
-│   │               SubmitManualConfirmC2SPacket
-│   ├── pad/        TaskPadScreen, TaskPadScreenHandler, TaskPadItem,
-│   │               OperationsPadScreen, AdminTaskScreenHandler, OperationsPadItem
-│   ├── registry/   TaskRegistry
-│   ├── repository/ TaskStateRepository, SqlTaskStateRepository,
-│   │               JsonTaskStateRepository, OpsTaskPoolRepository,
-│   │               SqlOpsTaskPoolRepository, JsonOpsTaskPoolRepository
-│   ├── service/    TaskService, TaskRewardService, TaskPermissionService
-│   ├── terminal/   TaskTerminalManager, TaskTerminalEntry, TaskTerminalToolItem,
-│   │               TerminalType, TerminalScreen, TerminalScreenHandler,
-│   │               TerminalScreenOpenData, TerminalScreenHandlerFactory,
-│   │               TerminalInteractListener, TaskTerminalRepository,
-│   │               SqlTerminalRepository, JsonTaskTerminalRepository
-│   └── util/       TaskTargetMatcher
-├── gmevent/
-│   ├── client/     GmKeybindings, GmKeyInputHandler
-│   ├── command/    GmEventCommands
-│   ├── data/       EncounterTemplate, SpawnBlockEntry, ActiveEvent,
-│   │               SpawnBehaviour, GmSkill, GmEventConfig
-│   ├── event/      MobDeathEventListener, GmDamageListener, GmMobHitListener
-│   ├── item/       SpawnBlockConfigTool, SpawnItemTool
-│   ├── network/    SaveTemplateC2SPacket, ActivateSpawnBlockC2SPacket,
-│   │               PushToPoolC2SPacket, FireSpawnC2SPacket,
-│   │               DespawnAllC2SPacket, GmToolRefreshS2CPacket
-│   ├── repository/ EncounterTemplateRepository, JsonEncounterTemplateRepository,
-│   │               SpawnBlockRepository, JsonSpawnBlockRepository,
-│   │               GmEventConfigRepository
-│   ├── screen/     SpawnConfigScreen, SpawnConfigScreenHandler,
-│   │               SpawnConfigScreenOpenData, SpawnConfigScreenHandlerFactory,
-│   │               SpawnItemScreen, SpawnItemScreenHandler,
-│   │               SpawnItemScreenOpenData, SpawnItemScreenHandlerFactory
-│   └── service/    GmEventService, GmPermissionService, GmSkillHandler
-├── degradation/
-│   ├── client/     ComponentWarningClientHandler
-│   ├── command/    EngineeringCommands
-│   ├── data/       ComponentEntry, ComponentStatus, DegradationConfig
-│   ├── event/      ComponentInteractListener, ComponentNamingChatListener,
-│   │               ComponentDamageListener, ComponentBlockBreakListener
-│   ├── item/       EngineeringPadItem, ComponentRegistrationTool
-│   ├── network/    ComponentWarningS2CPacket, OpenEngineeringPadS2CPacket,
-│   │               DegradationNetworking
-│   ├── repository/ ComponentRepository, JsonComponentRepository,
-│   │               SqlComponentRepository, DegradationConfigRepository
-│   ├── screen/     EngineeringPadScreen
-│   └── service/    DegradationService, ComponentIntegrityChecker
-└── registry/
-    ├── ModItems
-    └── ModScreenHandlers
-```
-
----
-
-## Resource Files
-
-```
-src/main/resources/assets/seconddawnrp/
-├── textures/gui/
-│   ├── task_pad.png
-│   ├── operations_pad.png
-│   ├── engineering_pad.png
-│   ├── terminal.png
-│   ├── spawn_block_config_gui.png
-│   └── spawn_item_gui.png
-└── textures/item/
-    ├── task_pad.png
-    ├── operations_pad.png
-    ├── engineering_pad.png
-    ├── task_terminal_tool.png
-    ├── component_registration_tool.png
-    ├── spawn_block_config_tool.png
-    └── spawn_item_tool.png
-
-src/main/resources/assets/seconddawnrp/lang/
-└── en_us.json
-
-src/main/resources/data/seconddawnrp/
-└── tasks/
-```
-
----
-
-## Development Roadmap
-
-| Phase | Status | Description |
-|---|---|---|
-| 1 — Core gameplay | ✅ Complete | Profiles, divisions, full task system, Pads, terminals, triggers, textures |
-| 2 — SQL persistence | ✅ Complete | All repositories migrated to SQLite, JSON kept as backup |
-| 3 — GM event system | ✅ Complete | Spawn blocks, spawn item, encounter templates, skills, keybindings, natural death prevention |
-| 4 — Engineering degradation | ✅ Complete | Component registration tool, health drain, auto tasks, repair with item consumption, explosion handling, Engineering Pad |
-| 5 — Warp core | 🔨 In Progress | M/ARA multiblock, reactor states, fuel system, fault events |
-| 6 — Medical systems | 📋 Planned | Injury system, downed state, gurney, tricorder, treatment tools |
-| 7 — Security systems | 📋 Planned | Camera network, sensor network, alert system, containment |
-| 8 — Science & polish | 🔮 Future | Research terminals, anomaly system, rank progression, certifications |
-
+# Second Dawn RP — Fabric Mod
+**Minecraft 1.21.1 | Fabric Loader 0.18.4 | Mod ID: `seconddawnrp`**
+
+A persistent sci-fi roleplay server mod built for a Star Trek-style ship RP server. Provides player profiles, task systems, GM tools, engineering degradation, and a warp core power system.
+ 
 ---
 
 ## Dependencies
 
-- **Fabric API** `0.116.9+1.21.1`
-- **LuckPerms** `5.4.140` — optional, degrades to `NoOpProfileSyncService`
-- **SQLite JDBC** — bundled
-- **Lithium** — performance, compatible
+| Mod | Version | Role |
+|-----|---------|------|
+| Fabric API | 0.116.9+1.21.1 | Required |
+| Tech Reborn | 5.11.19 | Optional — energy network |
+| Energized Power | 1.21.1-2.15.12 | Optional — energy network |
+| LuckPerms | Latest | Optional — division/permission sync |
+| TREnergy API | 4.1.0 | Bundled via `include modApi` |
+
+**build.gradle:**
+```groovy
+include modApi("teamreborn:energy:4.1.0")
+```
+```groovy
+maven { name = "TechReborn"; url = "https://maven.terraformersmc.com/" }
+```
+ 
+---
+
+## Architecture Overview
+
+```
+SecondDawnRP.java          ← Main entrypoint, all singleton services
+SecondDawnRPClient.java    ← Client initializer, packet receivers, screen openers
+ 
+registry/
+  ModBlocks.java           ← All block + block entity type registrations
+  ModItems.java            ← All item registrations
+ 
+profiles/                  ← Player profiles, divisions, LuckPerms sync
+tasksystem/                ← Task creation, state, rewards, terminals
+degradation/               ← Component registration, health, repair, Engineering Pad
+gmevent/                   ← GM tools: env effects, triggers, anomaly markers, tool visibility
+warpcore/                  ← Reactor state machine, energy output, monitor screen
+character/                 ← Character service stub (Phase 6+)
+```
+ 
+---
+
+## Completed Phases
+
+### Phase 1–3 — Core Systems ✅
+- Player profiles with division assignment (Command, Engineering, Medical, Security, Science)
+- LuckPerms group sync — division set by LP group, synced on join
+- Task system — pool tasks, personal tasks, manual confirm, auto-confirm objectives
+- Task terminals — physical blocks players interact with to claim/complete tasks
+- Operations pad item — GM tool for task management
+- SQLite + JSON dual persistence
+
+### Phase 4 — Engineering Degradation ✅
+- **Component Registration Tool** — sneak+right-click any block to register as a ship component
+- Components degrade over time: NOMINAL → DEGRADED → CRITICAL → OFFLINE
+- Repair system — sneak+right-click with correct item consumes it and restores health
+- Auto-generated Ops tasks when component hits CRITICAL
+- OFFLINE blocks suppress interactions with a warning message
+- **Engineering Pad** — right-click in air for full component overview, right-click warp core controller for focused view
+- Hover tooltip: name, status, health, X/Y/Z coordinates, repair item + count, `/engineering locate` hint
+- `/engineering locate <id>` — sends END_ROD beacon particles to specific player regardless of distance
+- `/engineering register/remove/status/list/sethealth/setrepair/save`
+
+### Phase 4.5 — GM Tools ✅
+- **Environmental Effect Tool** — register blocks that apply potion effects + medical conditions in radius. Scrollable dropdown GUI.
+- **Trigger Tool** — register trigger blocks. Modes: INTERACT, RADIUS. Actions: BROADCAST, ACTIVATE_LINKED, DEACTIVATE_LINKED, GENERATE_TASK, NOTIFY_GM, PLAY_SOUND. Full config GUI.
+- **Anomaly Marker Tool** — register anomaly contacts. Types: ENERGY, BIOLOGICAL, GRAVITATIONAL, UNKNOWN. Config GUI. Activating notifies relevant divisions.
+- **Tool Visibility** — holding a GM tool shows particle columns above registered blocks within 48 blocks. Distinct particles per tool: FLAME (components), SOUL_FIRE_FLAME (env), WITCH (triggers), END_ROD (anomalies), combo (warp core).
+- `/gm env`, `/gm trigger`, `/gm anomaly` command suites
+
+### Phase 5 — Warp Core ✅
+- **Warp Core Controller Block** — single block, has block entity for energy output
+- Registration via sneak+right-click with Warp Core Tool. Multiple cores supported, no limit.
+- State machine: OFFLINE → STARTING → ONLINE → UNSTABLE → CRITICAL → FAILED
+- **Startup assist** — requires 1000 E on an adjacent face to complete startup
+- **Fuel rods** — right-click controller with fuel rods in main or off-hand
+- **Energy output** — 2048 E/tick pushed to adjacent TR/EP cables. Scales with power% (UNSTABLE=60%, CRITICAL=25%)
+- **TREnergy integration** — push-based via `Transaction.openOuter()` + `target.insert()` each tick
+- **Resonance coils** — optional degradation components linked to reactor. Multiple coils, weighted health formula: `(average × 0.7) + (worst × 0.3)`. Low health → UNSTABLE. Dead → blocks startup.
+- CRITICAL/FAILED doubles degradation drain rate on all components globally
+- **Monitor screen** — state, power%, fuel bar, stability, coil health ×count. Physical Startup/Shutdown/Reset/Close buttons.
+- `/warpcore list/status/startup/shutdown/reset/fuel/linkcoil/unlinkcoil/unlinkallcoils/sources/fault/unregister`
+- Tab completion on component IDs for coil linking
 
 ---
 
-## Known Limitations
+## Items Reference
 
-- `CollectItemTaskListener` uses inventory snapshot delta (tick-based) — items consumed by crafting affect the count. Mixin-based approach planned for V2.
-- Task approval requires assigned player to be online.
-- Timed spawn mode uses overworld as fallback — stored event origin position is a planned V2 improvement.
-- `onMobHit` skills (KNOCKBACK_STRIKE, TELEPORT_BEHIND) require `GmMobHitListener` to be registered.
-- Component registration tool naming flow suppresses chat messages — players in naming mode cannot send public chat until they complete or cancel registration.
-
+| Item ID | Usage |
+|---------|-------|
+| `seconddawnrp:engineering_pad` | Right-click air: component overview. Right-click controller: focused warp core view. |
+| `seconddawnrp:component_registration_tool` | Sneak+right-click to register/unregister components |
+| `seconddawnrp:environmental_effect_tool` | Register environmental hazard blocks |
+| `seconddawnrp:trigger_tool` | Register trigger blocks |
+| `seconddawnrp:anomaly_marker_tool` | Register anomaly contacts |
+| `seconddawnrp:warp_core_tool` | Register/monitor warp cores. Sneak+right-click to register. |
+| `seconddawnrp:fuel_rod` | Right-click warp core controller to load |
+| `seconddawnrp:task_pad` | Player task management |
+| `seconddawnrp:operations_pad` | GM task management |
+ 
 ---
 
-## Architecture Rules — Non-Negotiable
+## Blocks Reference
 
-1. UI / Commands / Events must never call repositories directly
-2. Services must never access Minecraft client APIs
-3. Every new system gets a repository interface before any implementation
-4. `PlayerProfileManager`, `TaskService`, `ProfileRepository`, `TaskStateRepository` must never be refactored without full impact analysis
+| Block ID | Notes |
+|----------|-------|
+| `seconddawnrp:warp_core_controller` | Has block entity. Exposes EnergyStorage.SIDED. |
+| `seconddawnrp:warp_core_casing` | Decorative |
+| `seconddawnrp:warp_core_injector` | Decorative |
+| `seconddawnrp:warp_core_column` | Decorative, light level 8 |
+| `seconddawnrp:conduit` | Decorative |
+| `seconddawnrp:power_relay` | Decorative |
+| `seconddawnrp:fuel_tank` | Decorative |
+ 
+---
+
+## Config Files
+All configs live at `config/assets/seconddawnrp/` — **outside the world folder**.
+**Delete `warpcore.json` and `components.json` when wiping worlds.**
+
+| File | Contains |
+|------|----------|
+| `warpcore.json` | Registered cores (positions, state, fuel) |
+| `warpcore_config.json` | Fuel drain, output rate, thresholds |
+| `degradation_config.json` | Component drain rates, repair defaults |
+| `components.json` | Registered component entries |
+| `anomaly.json` | Registered anomaly markers |
+| `triggers.json` | Registered trigger blocks |
+| `env_effects.json` | Registered environmental effect blocks |
+| `vanilla_effects_registry.json` | Available potion effects for env tool |
+| `medical_conditions_registry.json` | Available medical conditions |
+ 
+---
+
+## Key Architectural Notes
+
+**TREnergy push-based.** The warp core calls `target.insert()` each tick inside `Transaction.openOuter()`. Cables do not pull. Always commit the transaction or nothing transfers.
+
+**Adjacent cable detection.** Query `EnergyStorage.SIDED.find(world, pos.offset(dir), dir.getOpposite())` — the adjacent block's face pointing back at the controller. Querying the controller's own faces returns null.
+
+**Config vs world data.** All service data persists to `config/assets/seconddawnrp/` not the world save. Manual cleanup needed on world wipes.
+
+**Block entity type registration.** Must use explicit lambda in `ModBlocks.register()`:
+```java
+/*BlockEntityType.Builder.create(
+    (pos, state) -> new WarpCoreControllerBlockEntity(WARP_CORE_CONTROLLER_ENTITY, pos, state),
+    WARP_CORE_CONTROLLER).build()*/
+```
+`WarpCoreControllerBlockEntity::new` causes a null TYPE at static init.
+
+**Payload registration order.** `PayloadTypeRegistry` calls must come before `ServerPlayNetworking.registerGlobalReceiver` calls or the game crashes on startup.
+
+**ComponentInteractListener priority.** The degradation listener fires via `UseBlockCallback` before `Block.onUse()`. If a block is both a registered component AND a registered warp core, the listener checks for warp core registration and returns `PASS` to let the block handle it.
+ 
+---
