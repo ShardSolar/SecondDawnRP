@@ -207,6 +207,8 @@ public class SecondDawnRP implements ModInitializer {
                             entries.add(Item.fromBlock(ModBlocks.CHARACTER_CREATION_TERMINAL));
                             entries.add(ModItems.RP_PADD);
                             entries.add(Item.fromBlock(ModBlocks.SUBMISSION_BOX));
+                            entries.add(ModItems.SPAWN_ITEM_TOOL);
+                            entries.add(ModItems.SPAWN_BLOCK_CONFIG_TOOL);
                         })
                         .build()
         );
