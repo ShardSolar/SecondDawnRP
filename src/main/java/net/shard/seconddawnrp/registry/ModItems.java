@@ -95,6 +95,13 @@ public class ModItems {
             new RpPaddItem(new Item.Settings().maxCount(1))
     );
 
+    public static final Item TERMINAL_DESIGNATOR_TOOL = Registry.register(
+            Registries.ITEM,
+            Identifier.of(SecondDawnRP.MOD_ID, "terminal_designator_tool"),
+            new net.shard.seconddawnrp.terminal.TerminalDesignatorToolItem(
+                    new Item.Settings().maxCount(1))
+    );
+
     private static Item register(String id, Item item) {
         return Registry.register(Registries.ITEM, SecondDawnRP.id(id), item);
     }

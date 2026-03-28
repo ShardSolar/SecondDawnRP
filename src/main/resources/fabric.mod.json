@@ -28,7 +28,8 @@
   },
   "suggests": {
     "luckperms": "*",
-    "techreborn": "*"
+    "techreborn": "*",
+    "computercraft": "*"
   }
 
 }

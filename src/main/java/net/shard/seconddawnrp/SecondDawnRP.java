@@ -94,6 +94,9 @@ import net.shard.seconddawnrp.tasksystem.terminal.SqlTerminalRepository;
 import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalManager;
 import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalRepository;
 import net.shard.seconddawnrp.tasksystem.terminal.TerminalInteractListener;
+import net.shard.seconddawnrp.terminal.TerminalDesignatorInteractListener;
+import net.shard.seconddawnrp.terminal.TerminalDesignatorRegistry;
+import net.shard.seconddawnrp.terminal.TerminalDesignatorService;
 import net.shard.seconddawnrp.warpcore.command.WarpCoreCommands;
 import net.shard.seconddawnrp.warpcore.data.WarpCoreConfig;
 import net.shard.seconddawnrp.warpcore.network.WarpCoreNetworking;
@@ -107,6 +110,8 @@ import java.util.UUID;
 public class SecondDawnRP implements ModInitializer {
 
     public static final String MOD_ID = "seconddawnrp";
+
+    // ── Core singletons ───────────────────────────────────────────────────────
 
     public static DatabaseManager DATABASE_MANAGER;
     public static PlayerProfileManager PROFILE_MANAGER;
@@ -137,6 +142,17 @@ public class SecondDawnRP implements ModInitializer {
     public static AnomalyService ANOMALY_SERVICE;
     public static GmToolVisibilityService GM_TOOL_VISIBILITY_SERVICE;
 
+    // ── Phase 5.25 — Terminal Designator + CC ─────────────────────────────────
+
+    public static TerminalDesignatorRegistry TERMINAL_DESIGNATOR_REGISTRY;
+    public static TerminalDesignatorService  TERMINAL_DESIGNATOR_SERVICE;
+
+    /** Null when CC is absent. Set by CCPeripheralRegistry on SERVER_STARTED. */
+    public static net.shard.seconddawnrp.cc.DegradationPeripheral CC_DEGRADATION_PERIPHERAL;
+    public static net.shard.seconddawnrp.cc.OpsPeripheral          CC_OPS_PERIPHERAL;
+
+    // ── onInitialize ──────────────────────────────────────────────────────────
+
     @Override
     public void onInitialize() {
 
@@ -146,10 +162,12 @@ public class SecondDawnRP implements ModInitializer {
 
         RP_PADD_ITEM = (RpPaddItem) ModItems.RP_PADD;
 
+        // ── Item groups ───────────────────────────────────────────────────────
         ItemGroupEvents.modifyEntriesEvent(ItemGroups.TOOLS).register(entries -> {
             entries.add(ModItems.TASK_PAD);
             entries.add(ModItems.OPERATIONS_PAD);
             entries.add(ModItems.TASK_TERMINAL_TOOL);
+            entries.add(ModItems.TERMINAL_DESIGNATOR_TOOL);  // Phase 5.25
             entries.add(ModItems.ENGINEERING_PAD);
             entries.add(ModItems.COMPONENT_REGISTRATION_TOOL);
             entries.add(ModItems.WARP_CORE_TOOL);
@@ -175,7 +193,7 @@ public class SecondDawnRP implements ModInitializer {
 
         ItemGroup secondDawnRPGroup = Registry.register(
                 Registries.ITEM_GROUP,
-                Identifier.of(net.shard.seconddawnrp.SecondDawnRP.MOD_ID, "00seconddawnrp"),
+                Identifier.of(SecondDawnRP.MOD_ID, "00seconddawnrp"),
                 FabricItemGroup.builder()
                         .displayName(Text.literal("SecondDawnRP").formatted(Formatting.GOLD))
                         .icon(() -> new ItemStack(ModItems.SPAWN_ITEM_TOOL))
@@ -183,6 +201,7 @@ public class SecondDawnRP implements ModInitializer {
                             entries.add(ModItems.TASK_PAD);
                             entries.add(ModItems.OPERATIONS_PAD);
                             entries.add(ModItems.TASK_TERMINAL_TOOL);
+                            entries.add(ModItems.TERMINAL_DESIGNATOR_TOOL);  // Phase 5.25
                             entries.add(ModItems.ENGINEERING_PAD);
                             entries.add(ModItems.COMPONENT_REGISTRATION_TOOL);
                             entries.add(ModItems.WARP_CORE_TOOL);
@@ -208,6 +227,7 @@ public class SecondDawnRP implements ModInitializer {
                         .build()
         );
 
+        // ── Database ──────────────────────────────────────────────────────────
         Path configDir = Path.of("config");
 
         DatabaseConfig databaseConfig = new DatabaseConfig(configDir);
@@ -219,6 +239,7 @@ public class SecondDawnRP implements ModInitializer {
             throw new RuntimeException("Failed to initialize database infrastructure", e);
         }
 
+        // ── Profile / Task ────────────────────────────────────────────────────
         ProfileRepository profileRepository = new SqlProfileRepository(DATABASE_MANAGER);
 
         JsonTaskStateRepository jsonTaskStateRepository = new JsonTaskStateRepository(configDir);
@@ -256,6 +277,7 @@ public class SecondDawnRP implements ModInitializer {
         TERMINAL_MANAGER = new TaskTerminalManager(taskTerminalRepository, TASK_SERVICE, PROFILE_MANAGER);
         new TerminalInteractListener(TERMINAL_MANAGER).register();
 
+        // ── GM Events ─────────────────────────────────────────────────────────
         JsonEncounterTemplateRepository templateRepo = new JsonEncounterTemplateRepository(configDir);
         try { templateRepo.init(); }
         catch (Exception e) { throw new RuntimeException("Failed to initialize encounter template repository", e); }
@@ -279,6 +301,7 @@ public class SecondDawnRP implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 GmEventCommands.register(dispatcher));
 
+        // ── Degradation ───────────────────────────────────────────────────────
         DegradationConfigRepository degradationConfigRepo = new DegradationConfigRepository(configDir);
         try { degradationConfigRepo.init(); }
         catch (Exception e) { throw new RuntimeException("Failed to initialize degradation config", e); }
@@ -299,6 +322,7 @@ public class SecondDawnRP implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 EngineeringCommands.register(dispatcher, registryAccess, environment));
 
+        // ── Warp Core ─────────────────────────────────────────────────────────
         WarpCoreConfigRepository warpCoreConfigRepo = new WarpCoreConfigRepository(configDir);
         try { warpCoreConfigRepo.init(); }
         catch (Exception e) { throw new RuntimeException("Failed to initialize warp core config", e); }
@@ -315,6 +339,7 @@ public class SecondDawnRP implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 WarpCoreCommands.register(dispatcher, registryAccess, environment));
 
+        // ── Character System ──────────────────────────────────────────────────
         CHARACTER_ARCHIVE = new CharacterArchiveRepository(DATABASE_MANAGER);
         SPECIES_REGISTRY = new SpeciesRegistry();
 
@@ -341,6 +366,7 @@ public class SecondDawnRP implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 GmCharacterCommands.register(dispatcher));
 
+        // ── Dice + RP PADD ────────────────────────────────────────────────────
         RollModifierConfig rollModifierConfig = new RollModifierConfig(configDir);
 
         RP_PADD_SERVICE = new RpPaddService();
@@ -358,6 +384,7 @@ public class SecondDawnRP implements ModInitializer {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 GmRollCommands.register(dispatcher));
 
+        // ── GM Tools (env / trigger / anomaly) ───────────────────────────────
         GM_REGISTRY_SERVICE = new GmRegistryService(configDir);
 
         JsonEnvironmentalEffectRepository envRepo = new JsonEnvironmentalEffectRepository(configDir);
@@ -392,6 +419,7 @@ public class SecondDawnRP implements ModInitializer {
         AnomalyClientHandler.registerServerReceiver();
         PayloadTypeRegistry.playS2C().register(LocateComponentS2CPacket.ID, LocateComponentS2CPacket.CODEC);
 
+        // Existing INTERACT trigger callback
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
             if (world.isClient()) return ActionResult.PASS;
             if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
@@ -403,6 +431,18 @@ public class SecondDawnRP implements ModInitializer {
                     .orElse(ActionResult.PASS);
         });
 
+        // ── Phase 5.25 — Terminal Designator ─────────────────────────────────
+        TERMINAL_DESIGNATOR_REGISTRY = new TerminalDesignatorRegistry(configDir);
+        try { TERMINAL_DESIGNATOR_REGISTRY.init(); }
+        catch (Exception e) { throw new RuntimeException("Failed to initialize terminal designator registry", e); }
+
+        TERMINAL_DESIGNATOR_SERVICE = new TerminalDesignatorService();
+
+        // Register interact listener AFTER the trigger block listener above so trigger
+        // blocks that are also terminal blocks still fire their trigger first.
+        new TerminalDesignatorInteractListener().register();
+
+        // ── Tick loop ─────────────────────────────────────────────────────────
         ServerTickEvents.END_SERVER_TICK.register(server -> GM_EVENT_SERVICE.tick(server));
         ServerTickEvents.END_SERVER_TICK.register(server -> DEGRADATION_SERVICE.tick(server));
         ServerTickEvents.END_SERVER_TICK.register(server -> WARP_CORE_SERVICE.tick(server));
@@ -412,18 +452,24 @@ public class SecondDawnRP implements ModInitializer {
                 LONG_TERM_INJURY_SERVICE.tick(server, server.getTicks()));
         ServerTickEvents.END_SERVER_TICK.register(server ->
                 ROLL_SERVICE.tick(server, server.getTicks()));
+
+        // 10-tick poll: GM tool visibility + terminal designator glow
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (server.getTicks() % 10 != 0) return;
             for (var player : server.getPlayerManager().getPlayerList()) {
                 GM_TOOL_VISIBILITY_SERVICE.onEquip(player, player.getMainHandStack());
+                TERMINAL_DESIGNATOR_SERVICE.tickGlowForPlayer(player);  // Phase 5.25
             }
         });
+
+        // 7-day RP PADD cleanup
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (server.getTicks() % 1_728_000 == 0 && server.getTicks() > 0) {
                 RP_PADD_SUBMISSION_SERVICE.cleanup();
             }
         });
 
+        // ── SERVER_STARTED ────────────────────────────────────────────────────
         ServerLifecycleEvents.SERVER_STARTED.register(server -> {
             PROFILE_SERVICE.setProfileSyncService(new NoOpProfileSyncService());
             PERMISSION_SERVICE = new NoOpPermissionService();
@@ -475,8 +521,13 @@ public class SecondDawnRP implements ModInitializer {
             rollModifierConfig.load();
             ROLL_SERVICE.setServer(server);
             RP_PADD_SUBMISSION_SERVICE.setServer(server);
+
+            // Phase 5.25 — reload terminal designations, then register CC peripherals
+            TERMINAL_DESIGNATOR_REGISTRY.reload();
+            net.shard.seconddawnrp.cc.CCPeripheralRegistry.register(server);
         });
 
+        // ── Player join / leave ───────────────────────────────────────────────
         ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
             PlayerProfile profile = PROFILE_SERVICE.getOrLoad(handler.getPlayer());
             TASK_SERVICE.loadTaskState(profile);
@@ -492,6 +543,7 @@ public class SecondDawnRP implements ModInitializer {
             PROFILE_MANAGER.unloadProfile(playerUuid);
         });
 
+        // ── SERVER_STOPPING ───────────────────────────────────────────────────
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> {
             for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
                 PlayerProfile profile = PROFILE_MANAGER.getLoadedProfile(player.getUuid());
@@ -503,6 +555,8 @@ public class SecondDawnRP implements ModInitializer {
             DEGRADATION_SERVICE.saveAll();
             PROFILE_MANAGER.saveAll();
             ANOMALY_SERVICE.saveAll();
+            // Terminal designator saves on every mutation already; this is a safety net.
+            TERMINAL_DESIGNATOR_REGISTRY.saveAll();
 
             if (DATABASE_MANAGER != null) {
                 try { DATABASE_MANAGER.close(); }

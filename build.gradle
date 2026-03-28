@@ -13,6 +13,29 @@ base {
 repositories {
     mavenCentral()
 
+    maven {
+        name = "TechReborn"
+        url = "https://maven.terraformersmc.com/"
+    }
+
+    maven {
+        name = "FabricMC"
+        url = "https://maven.fabricmc.net/"
+    }
+
+    maven {
+        url = "https://repo.lucko.me/"
+    }
+
+    // ComputerCraft — compile-only, not bundled, not required at runtime
+    maven {
+        name = "SquidDev"
+        url = "https://maven.squiddev.cc"
+        content {
+            includeGroup("cc.tweaked")
+        }
+    }
+
     exclusiveContent {
         forRepository {
             maven {
@@ -23,23 +46,6 @@ repositories {
         filter {
             includeGroup "maven.modrinth"
         }
-
-        // Team Reborn Energy API (TREnergy)
-        maven {
-            name = "TechReborn"
-            url = "https://maven.terraformersmc.com/"
-        }
-        // Fallback if above doesn't have it
-        maven {
-            name = "FabricMC"
-            url = "https://maven.fabricmc.net/"
-        }
-
-        maven {
-            url = "https://repo.lucko.me/"
-        }
-
-
     }
 }
 
@@ -50,16 +56,19 @@ dependencies {
 
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     modImplementation "maven.modrinth:lithium:mc1.21.1-0.15.2-fabric"
-    modImplementation "net.luckperms:api:5.4"
 
     modCompileOnly "net.luckperms:api:5.4"
     modLocalRuntime "maven.modrinth:luckperms:v5.4.140-fabric"
+
     implementation "org.xerial:sqlite-jdbc:3.45.3.0"
     include "org.xerial:sqlite-jdbc:3.45.3.0"
     include modApi("teamreborn:energy:4.1.0")
 
+    // ComputerCraft API — compile-only so the .cc package builds cleanly.
+    // Not bundled, not required at runtime. CCPeripheralRegistry checks
+    // FabricLoader.isModLoaded("computercraft") before touching any CC class.
+    modCompileOnly "cc.tweaked:cc-tweaked-1.21.1-fabric-api:1.117.1"
 }
-
 
 fabricApi {
     configureDataGeneration() {
@@ -82,14 +91,14 @@ processResources {
 }
 
 tasks.withType(JavaCompile).configureEach {
-    it.options.release = 17
+    it.options.release = 21
 }
 
 java {
     withSourcesJar()
 
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 jar {
