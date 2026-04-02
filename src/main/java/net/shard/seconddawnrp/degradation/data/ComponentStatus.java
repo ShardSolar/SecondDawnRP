@@ -2,16 +2,16 @@ package net.shard.seconddawnrp.degradation.data;
 
 public enum ComponentStatus {
 
-    /** Health 76–100. No drain acceleration. No task. */
+    /** Health 76–100. No drain acceleration. Fully functional. */
     NOMINAL,
 
-    /** Health 51–75. Particle warnings pulse every 60s. */
+    /** Health 51–75. Warning state. Still functional. */
     DEGRADED,
 
-    /** Health 26–50. Particles every 20s, auto-repair task generated. */
+    /** Health 26–50. Functionally locked, repair required, auto-task generated. */
     CRITICAL,
 
-    /** Health 0–25. Offline: block emits constant smoke, all actions locked. */
+    /** Health 0–25. Fully failed/offline, same lock plus severe failure effects. */
     OFFLINE;
 
     public static ComponentStatus fromHealth(int health) {

@@ -4,7 +4,9 @@
   "package": "net.shard.seconddawnrp.mixin",
   "compatibilityLevel": "JAVA_21",
   "mixins": [
-    "MilkBucketItemMixin"
+    "MilkBucketItemMixin",
+    "degradation.AbstractBlockStateRedstoneMixin",
+    "degradation.AbstractBlockStateComparatorMixin"
   ],
   "injectors": {
     "defaultRequire": 1

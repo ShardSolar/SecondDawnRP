@@ -25,6 +25,7 @@ import net.shard.seconddawnrp.database.DatabaseBootstrap;
 import net.shard.seconddawnrp.database.DatabaseConfig;
 import net.shard.seconddawnrp.database.DatabaseManager;
 import net.shard.seconddawnrp.database.DatabaseMigrations;
+import net.shard.seconddawnrp.degradation.ComponentInteractionBlocker;
 import net.shard.seconddawnrp.degradation.command.EngineeringCommands;
 import net.shard.seconddawnrp.degradation.data.DegradationConfig;
 import net.shard.seconddawnrp.degradation.event.ComponentBlockBreakListener;
@@ -157,6 +158,7 @@ public class SecondDawnRP implements ModInitializer {
     public static GmToolVisibilityService GM_TOOL_VISIBILITY_SERVICE;
     public static DownedService DOWNED_SERVICE;
     public static GurneyService GURNEY_SERVICE;
+
 
 
     // ── Phase 5.25 ────────────────────────────────────────────────────────────
@@ -352,6 +354,7 @@ public class SecondDawnRP implements ModInitializer {
         new ComponentNamingChatListener().register();
         new ComponentDamageListener().register();
         new ComponentBlockBreakListener().register();
+        ComponentInteractionBlocker.register();
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 EngineeringCommands.register(dispatcher, registryAccess, environment));
@@ -467,6 +470,8 @@ public class SecondDawnRP implements ModInitializer {
                     .map(e -> { TRIGGER_SERVICE.fireInteract(e, sp); return ActionResult.PASS; })
                     .orElse(ActionResult.PASS);
         });
+
+
 
         // ── Phase 5.25 — Terminal Designator ─────────────────────────────────
 

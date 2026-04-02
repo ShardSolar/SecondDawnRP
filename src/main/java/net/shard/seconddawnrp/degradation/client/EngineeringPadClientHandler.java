@@ -6,6 +6,8 @@ import net.minecraft.particle.ParticleEffect;
 import net.minecraft.particle.ParticleTypes;
 import net.shard.seconddawnrp.degradation.data.ComponentStatus;
 import net.shard.seconddawnrp.degradation.network.LocateComponentS2CPacket;
+import net.shard.seconddawnrp.degradation.network.OpenEngineeringPadS2CPacket;
+import net.shard.seconddawnrp.degradation.screen.EngineeringPadScreen;
 
 public final class EngineeringPadClientHandler {
 
@@ -16,6 +18,28 @@ public final class EngineeringPadClientHandler {
                 LocateComponentS2CPacket.ID,
                 (payload, context) -> context.client().execute(() -> spawnLocatorParticles(payload))
         );
+
+        ClientPlayNetworking.registerGlobalReceiver(
+                OpenEngineeringPadS2CPacket.ID,
+                (payload, context) -> context.client().execute(() -> openEngineeringPad(payload))
+        );
+    }
+
+    private static void openEngineeringPad(OpenEngineeringPadS2CPacket payload) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client == null) {
+            return;
+        }
+
+        client.setScreen(new EngineeringPadScreen(
+                payload.components(),
+                payload.warpCores(),
+                payload.focusedCoreId(),
+                payload.warpCoreState(),
+                payload.warpCoreFuel(),
+                payload.warpCoreMaxFuel(),
+                payload.warpCorePower()
+        ));
     }
 
     private static void spawnLocatorParticles(LocateComponentS2CPacket payload) {

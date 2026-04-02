@@ -1,0 +1,22 @@
+[
+  {
+  "id": "basic_hostile",
+  "displayName": "Basic Hostile",
+  "mobTypeId": "minecraft:zombie",
+  "maxHealth": 20.0,
+  "armor": 0.0,
+  "totalSpawnCount": 4,
+  "maxActiveAtOnce": 4,
+  "spawnRadiusBlocks": 8,
+  "spawnIntervalTicks": 20,
+  "spawnBehaviour": "INSTANT",
+  "statusEffects": [],
+  "heldItems": [],
+  "drops": [],
+  "preventSunlightDamage": true,
+  "preventNaturalDespawn": true,
+  "preventSuffocation": false,
+  "preventDrowning": false,
+  "preventFallDamage": false
+}
+  ]

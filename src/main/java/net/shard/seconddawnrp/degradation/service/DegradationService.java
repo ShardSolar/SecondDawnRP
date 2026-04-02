@@ -2,6 +2,8 @@ package net.shard.seconddawnrp.degradation.service;
 
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.text.Text;
+import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.shard.seconddawnrp.degradation.data.ComponentEntry;
 import net.shard.seconddawnrp.degradation.data.ComponentStatus;
@@ -9,7 +11,6 @@ import net.shard.seconddawnrp.degradation.data.DegradationConfig;
 import net.shard.seconddawnrp.degradation.network.ComponentWarningS2CPacket;
 import net.shard.seconddawnrp.degradation.repository.ComponentRepository;
 import net.shard.seconddawnrp.division.Division;
-import net.shard.seconddawnrp.tasksystem.data.OpsTaskStatus;
 import net.shard.seconddawnrp.tasksystem.data.TaskObjectiveType;
 import net.shard.seconddawnrp.tasksystem.service.TaskService;
 
@@ -77,15 +78,17 @@ public class DegradationService {
         if (elapsed < config.getDrainIntervalMs()) return;
 
         int baseDrain = switch (entry.getStatus()) {
-            case NOMINAL   -> config.getDrainPerTickNominal();
-            case DEGRADED  -> config.getDrainPerTickDegraded();
+            case NOMINAL -> config.getDrainPerTickNominal();
+            case DEGRADED -> config.getDrainPerTickDegraded();
             case CRITICAL, OFFLINE -> config.getDrainPerTickCritical();
         };
+
         int drain = reactorCritical
                 ? (int) Math.ceil(baseDrain * reactorDrainMultiplier)
                 : baseDrain;
 
         ComponentStatus previousStatus = entry.getStatus();
+
         entry.setHealth(entry.getHealth() - drain);
         entry.setLastDrainTickMs(now);
 
@@ -95,10 +98,14 @@ public class DegradationService {
             maybeGenerateRepairTask(entry, now);
         }
 
-        // OFFLINE transition — broadcast alert, stop further drain
+        // OFFLINE transition — broadcast alert
         if (previousStatus != ComponentStatus.OFFLINE
                 && entry.getStatus() == ComponentStatus.OFFLINE) {
             onComponentOffline(entry);
+        }
+
+        if (previousStatus != entry.getStatus()) {
+            notifyBlockStateChanged(entry);
         }
 
         repository.save(entry);
@@ -106,15 +113,16 @@ public class DegradationService {
 
     private void tickWarningPulse(ComponentEntry entry) {
         if (server == null) return;
+
         if (entry.getStatus() == ComponentStatus.NOMINAL) {
             pulseCounters.remove(entry.getComponentId());
             return;
         }
 
         int pulseTicks = switch (entry.getStatus()) {
-            case DEGRADED        -> config.getWarningPulseTicksDegraded();
+            case DEGRADED -> config.getWarningPulseTicksDegraded();
             case CRITICAL, OFFLINE -> config.getWarningPulseTicksCritical();
-            default              -> Integer.MAX_VALUE;
+            default -> Integer.MAX_VALUE;
         };
 
         int counter = pulseCounters.getOrDefault(entry.getComponentId(), 0) + 1;
@@ -127,6 +135,7 @@ public class DegradationService {
 
     private void broadcastWarning(ComponentEntry entry) {
         if (server == null) return;
+
         BlockPos pos = BlockPos.fromLong(entry.getBlockPosLong());
         ServerWorld world = resolveWorld(entry.getWorldKey());
         if (world == null) return;
@@ -142,8 +151,7 @@ public class DegradationService {
         double r = config.getWarningRadiusBlocks();
         world.getPlayers().stream()
                 .filter(p -> p.getBlockPos().isWithinDistance(pos, r))
-                .forEach(p -> net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking
-                        .send(p, packet));
+                .forEach(p -> net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, packet));
     }
 
     // ── Task Auto-Generation ──────────────────────────────────────────────────
@@ -178,7 +186,7 @@ public class DegradationService {
                 + entry.getComponentId() + "'.");
     }
 
-    // ── Registration ─────────────────────────────────────────────────────────
+    // ── Registration ──────────────────────────────────────────────────────────
 
     public ComponentEntry register(
             String worldKey,
@@ -189,17 +197,29 @@ public class DegradationService {
         boolean alreadyExists = cache.values().stream()
                 .anyMatch(e -> e.getWorldKey().equals(worldKey)
                         && e.getBlockPosLong() == blockPosLong);
+
         if (alreadyExists) {
-            throw new IllegalStateException(
-                    "A component is already registered at this position.");
+            throw new IllegalStateException("A component is already registered at this position.");
         }
 
         String id = generateComponentId(displayName, blockPosLong);
         long now = System.currentTimeMillis();
+
         ComponentEntry entry = new ComponentEntry(
-                id, worldKey, blockPosLong, blockTypeId, displayName,
-                100, ComponentStatus.NOMINAL, now, 0L, registeredBy,
-                null, 0);
+                id,
+                worldKey,
+                blockPosLong,
+                blockTypeId,
+                displayName,
+                100,
+                ComponentStatus.NOMINAL,
+                now,
+                0L,
+                registeredBy,
+                null,
+                0
+        );
+
         cache.put(id, entry);
         repository.save(entry);
         return entry;
@@ -210,9 +230,12 @@ public class DegradationService {
                 .filter(e -> e.getWorldKey().equals(worldKey)
                         && e.getBlockPosLong() == blockPosLong)
                 .findFirst();
+
         if (existing.isEmpty()) return false;
+
         cache.remove(existing.get().getComponentId());
         repository.delete(existing.get().getComponentId());
+        pulseCounters.remove(existing.get().getComponentId());
         return true;
     }
 
@@ -223,10 +246,53 @@ public class DegradationService {
                 .filter(e -> e.getWorldKey().equals(worldKey)
                         && e.getBlockPosLong() == blockPosLong)
                 .findFirst();
+
         if (opt.isEmpty()) return Optional.empty();
 
         ComponentEntry entry = opt.get();
+        ComponentStatus previousStatus = entry.getStatus();
+
         entry.setHealth(entry.getHealth() + config.getHealthPerRepair());
+
+        if (previousStatus != entry.getStatus()) {
+            notifyBlockStateChanged(entry);
+        }
+
+        repository.save(entry);
+        return Optional.of(entry);
+    }
+
+    /**
+     * Apply direct combat damage to a component, bypassing the normal timed drain interval.
+     */
+    public Optional<ComponentEntry> applyDamage(String worldKey, long blockPosLong, int amount) {
+        Optional<ComponentEntry> opt = cache.values().stream()
+                .filter(e -> e.getWorldKey().equals(worldKey)
+                        && e.getBlockPosLong() == blockPosLong)
+                .findFirst();
+
+        if (opt.isEmpty()) return Optional.empty();
+
+        ComponentEntry entry = opt.get();
+        ComponentStatus previousStatus = entry.getStatus();
+
+        entry.setHealth(entry.getHealth() - amount);
+
+        long now = System.currentTimeMillis();
+        if (previousStatus != ComponentStatus.CRITICAL
+                && entry.getStatus() == ComponentStatus.CRITICAL) {
+            maybeGenerateRepairTask(entry, now);
+        }
+
+        if (previousStatus != ComponentStatus.OFFLINE
+                && entry.getStatus() == ComponentStatus.OFFLINE) {
+            onComponentOffline(entry);
+        }
+
+        if (previousStatus != entry.getStatus()) {
+            notifyBlockStateChanged(entry);
+        }
+
         repository.save(entry);
         return Optional.of(entry);
     }
@@ -244,34 +310,6 @@ public class DegradationService {
                 .findFirst();
     }
 
-
-    /**
-     * Apply direct combat damage to a component, bypassing the time-based
-     * drain interval. Used by ComponentDamageListener and Phase 5 combat events.
-     *
-     * @param amount health points to drain (positive value)
-     * @return the updated entry, or empty if no component at this position
-     */
-    public Optional<ComponentEntry> applyDamage(String worldKey, long blockPosLong, int amount) {
-        Optional<ComponentEntry> opt = cache.values().stream()
-                .filter(e -> e.getWorldKey().equals(worldKey)
-                        && e.getBlockPosLong() == blockPosLong)
-                .findFirst();
-        if (opt.isEmpty()) return Optional.empty();
-
-        ComponentEntry entry = opt.get();
-        ComponentStatus previousStatus = entry.getStatus();
-        entry.setHealth(entry.getHealth() - amount);
-
-        long now = System.currentTimeMillis();
-        if (previousStatus != ComponentStatus.CRITICAL
-                && entry.getStatus() == ComponentStatus.CRITICAL) {
-            maybeGenerateRepairTask(entry, now);
-        }
-
-        repository.save(entry);
-        return Optional.of(entry);
-    }
     public Optional<ComponentEntry> getById(String componentId) {
         return Optional.ofNullable(cache.get(componentId));
     }
@@ -286,8 +324,7 @@ public class DegradationService {
     }
 
     /**
-     * Called by WarpCoreService when the reactor enters or leaves CRITICAL/FAILED state.
-     * While critical, all component drain rates are multiplied by the given multiplier.
+     * While reactor is critical, degradation drain rate is multiplied.
      */
     public void setReactorCritical(boolean critical, double multiplier) {
         this.reactorCritical = critical;
@@ -297,36 +334,64 @@ public class DegradationService {
         }
     }
 
-    public boolean isReactorCritical() { return reactorCritical; }
+    public boolean isReactorCritical() {
+        return reactorCritical;
+    }
 
     /**
-     * Returns true if the block at the given position has a registered OFFLINE component.
-     * Used by UseBlockCallback to suppress player interactions with failed components.
+     * Returns true if this status should disable all functional behavior.
+     * For gameplay, CRITICAL and OFFLINE are both considered locked.
+     */
+    public boolean isFunctionLocked(ComponentStatus status) {
+        return status == ComponentStatus.CRITICAL || status == ComponentStatus.OFFLINE;
+    }
+
+    /**
+     * Returns true if the block at the given position has a registered component
+     * whose functionality should be suppressed.
      */
     public boolean isBlockDisabled(String worldKey, long blockPosLong) {
         return cache.values().stream()
                 .anyMatch(e -> e.getWorldKey().equals(worldKey)
                         && e.getBlockPosLong() == blockPosLong
-                        && e.getStatus() == ComponentStatus.OFFLINE);
+                        && isFunctionLocked(e.getStatus()));
     }
 
     private void onComponentOffline(ComponentEntry entry) {
         System.out.println("[SecondDawnRP] Component OFFLINE: " + entry.getDisplayName());
+
         if (server == null) return;
-        net.minecraft.text.Text msg = net.minecraft.text.Text.literal(
+
+        Text msg = Text.literal(
                         "[Engineering] OFFLINE: " + entry.getDisplayName()
                                 + " is non-functional. Immediate repair required.")
-                .formatted(net.minecraft.util.Formatting.DARK_RED);
+                .formatted(Formatting.DARK_RED);
+
         server.getPlayerManager().getPlayerList()
                 .forEach(p -> p.sendMessage(msg, false));
+    }
+
+    private void notifyBlockStateChanged(ComponentEntry entry) {
+        ServerWorld world = resolveWorld(entry.getWorldKey());
+        if (world == null) return;
+
+        BlockPos pos = BlockPos.fromLong(entry.getBlockPosLong());
+        var state = world.getBlockState(pos);
+
+        world.updateNeighborsAlways(pos, state.getBlock());
+        world.updateComparators(pos, state.getBlock());
+        world.markDirty(pos);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private ServerWorld resolveWorld(String worldKey) {
         if (server == null) return null;
+
         for (ServerWorld w : server.getWorlds()) {
-            if (w.getRegistryKey().getValue().toString().equals(worldKey)) return w;
+            if (w.getRegistryKey().getValue().toString().equals(worldKey)) {
+                return w;
+            }
         }
         return null;
     }
@@ -341,11 +406,14 @@ public class DegradationService {
                 .replaceAll("[^a-z0-9]+", "_")
                 .replaceAll("_+", "_")
                 .replaceAll("^_|_$", "");
+
         String candidate = base + "_" + Long.toHexString(blockPosLong & 0xFFFFFFL);
         int suffix = 2;
+
         while (cache.containsKey(candidate)) {
             candidate = base + "_" + Long.toHexString(blockPosLong & 0xFFFFFFL) + "_" + suffix++;
         }
+
         return candidate;
     }
 
