@@ -12,19 +12,20 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.character.LongTermInjury;
-import net.shard.seconddawnrp.playerdata.PlayerProfile;
 
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * GM commands for the Phase 8 Medical system.
  *
  * <pre>
  *  /gm medical apply  [player] [conditionKey] [note?]   — apply a registry condition
- *  /gm medical clear  [player] [conditionId]            — force-resolve a condition
+ *  /gm medical clear  [player] [conditionId|conditionKey] — force-resolve an active condition
  *  /gm medical list   [player]                          — list active conditions with IDs
  *  /gm medical conditions                               — list all registry condition keys
  *  /gm medical reload                                   — hot-reload condition registry
@@ -35,13 +36,42 @@ public final class GmMedicalCommands {
     private static final DateTimeFormatter DATE_FMT =
             DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
 
-    /** Tab-completion provider for condition keys loaded in the registry. */
+    /** Tab-completion provider for registry condition keys. */
     private static final SuggestionProvider<ServerCommandSource> CONDITION_KEY_SUGGESTIONS =
             (ctx, builder) -> {
                 SecondDawnRP.MEDICAL_CONDITION_REGISTRY.getAll().stream()
                         .map(MedicalConditionTemplate::key)
                         .filter(k -> k.startsWith(builder.getRemaining()))
                         .forEach(builder::suggest);
+                return builder.buildFuture();
+            };
+
+    /**
+     * Tab-completion provider for active condition IDs and active condition keys
+     * on the selected target player.
+     */
+    private static final SuggestionProvider<ServerCommandSource> ACTIVE_CONDITION_SUGGESTIONS =
+            (ctx, builder) -> {
+                try {
+                    ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
+                    List<MedicalService.ConditionDetail> details =
+                            SecondDawnRP.MEDICAL_SERVICE.getActiveConditions(target.getUuid());
+
+                    String remaining = builder.getRemaining();
+
+                    for (MedicalService.ConditionDetail detail : details) {
+                        String id = detail.condition().getInjuryId();
+                        if (id != null && id.startsWith(remaining)) {
+                            builder.suggest(id);
+                        }
+
+                        String key = detail.condition().getConditionKey();
+                        if (key != null && key.startsWith(remaining)) {
+                            builder.suggest(key);
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
                 return builder.buildFuture();
             };
 
@@ -62,24 +92,25 @@ public final class GmMedicalCommands {
                                                                 .executes(ctx -> applyCondition(ctx, true)))
                                                         .executes(ctx -> applyCondition(ctx, false)))))
 
-                                // /gm medical clear <player> <conditionId>
+                                // /gm medical clear <player> <conditionId|conditionKey>
                                 .then(CommandManager.literal("clear")
                                         .then(CommandManager.argument("player", EntityArgumentType.player())
-                                                .then(CommandManager.argument("conditionId", StringArgumentType.word())
-                                                        .executes(ctx -> clearCondition(ctx)))))
+                                                .then(CommandManager.argument("condition", StringArgumentType.word())
+                                                        .suggests(ACTIVE_CONDITION_SUGGESTIONS)
+                                                        .executes(GmMedicalCommands::clearCondition))))
 
                                 // /gm medical list <player>
                                 .then(CommandManager.literal("list")
                                         .then(CommandManager.argument("player", EntityArgumentType.player())
-                                                .executes(ctx -> listConditions(ctx))))
+                                                .executes(GmMedicalCommands::listConditions)))
 
                                 // /gm medical conditions
                                 .then(CommandManager.literal("conditions")
-                                        .executes(ctx -> listRegistry(ctx)))
+                                        .executes(GmMedicalCommands::listRegistry))
 
                                 // /gm medical reload
                                 .then(CommandManager.literal("reload")
-                                        .executes(ctx -> reloadRegistry(ctx)))
+                                        .executes(GmMedicalCommands::reloadRegistry))
                         )
         );
     }
@@ -100,7 +131,8 @@ public final class GmMedicalCommands {
             }
 
             String appliedByUuid = ctx.getSource().getEntity() instanceof ServerPlayerEntity gm
-                    ? gm.getUuidAsString() : "server";
+                    ? gm.getUuidAsString()
+                    : "server";
 
             MedicalService.ApplyResult result = SecondDawnRP.MEDICAL_SERVICE.applyCondition(
                     target.getUuid(), conditionKey, null, null, note, appliedByUuid);
@@ -110,6 +142,7 @@ public final class GmMedicalCommands {
                         .get(conditionKey)
                         .map(MedicalConditionTemplate::displayName)
                         .orElse(conditionKey);
+
                 ctx.getSource().sendFeedback(
                         () -> Text.literal("[Medical] Applied '")
                                 .formatted(Formatting.GREEN)
@@ -134,30 +167,90 @@ public final class GmMedicalCommands {
     private static int clearCondition(CommandContext<ServerCommandSource> ctx) {
         try {
             ServerPlayerEntity target = EntityArgumentType.getPlayer(ctx, "player");
-            String conditionId = StringArgumentType.getString(ctx, "conditionId");
+            String input = StringArgumentType.getString(ctx, "condition");
 
-            PlayerProfile profile = SecondDawnRP.PROFILE_MANAGER.getLoadedProfile(target.getUuid());
-            if (profile != null && !profile.hasMedicalConditionId(conditionId)) {
+            List<MedicalService.ConditionDetail> details =
+                    SecondDawnRP.MEDICAL_SERVICE.getActiveConditions(target.getUuid());
+
+            if (details.isEmpty()) {
                 ctx.getSource().sendError(Text.literal(
-                        "[Medical] Condition '" + conditionId + "' is not active on "
-                                + target.getName().getString() + ". Use /gm medical list to check IDs."));
+                        "[Medical] No active conditions found on " + target.getName().getString() + "."));
                 return 0;
             }
 
-            String gmUuid = ctx.getSource().getEntity() instanceof ServerPlayerEntity gm
-                    ? gm.getUuidAsString() : "server";
+            // First: exact match on active condition ID
+            MedicalService.ConditionDetail exactIdMatch = null;
+            for (MedicalService.ConditionDetail detail : details) {
+                LongTermInjury condition = detail.condition();
+                if (condition.getInjuryId() != null && condition.getInjuryId().equals(input)) {
+                    exactIdMatch = detail;
+                    break;
+                }
+            }
 
-            SecondDawnRP.MEDICAL_SERVICE.forceResolve(conditionId, gmUuid);
+            if (exactIdMatch != null) {
+                return resolveMatchedCondition(ctx, target, exactIdMatch);
+            }
 
-            ctx.getSource().sendFeedback(
-                    () -> Text.literal("[Medical] Condition force-cleared from "
-                                    + target.getName().getString() + ".")
-                            .formatted(Formatting.GREEN), true);
-            return 1;
+            // Second: match by condition key
+            List<MedicalService.ConditionDetail> keyMatches = new ArrayList<>();
+            for (MedicalService.ConditionDetail detail : details) {
+                LongTermInjury condition = detail.condition();
+                if (condition.getConditionKey() != null && condition.getConditionKey().equals(input)) {
+                    keyMatches.add(detail);
+                }
+            }
+
+            if (keyMatches.isEmpty()) {
+                ctx.getSource().sendError(Text.literal(
+                        "[Medical] No active condition matching '" + input + "' found on "
+                                + target.getName().getString()
+                                + ". Use /gm medical list to check IDs/keys."));
+                return 0;
+            }
+
+            if (keyMatches.size() > 1) {
+                ctx.getSource().sendError(Text.literal(
+                        "[Medical] Multiple active conditions match key '" + input
+                                + "' on " + target.getName().getString()
+                                + ". Use the condition ID instead:"));
+
+                for (MedicalService.ConditionDetail detail : keyMatches) {
+                    LongTermInjury c = detail.condition();
+                    String line = "  - " + c.getInjuryId() + " §7(" + c.getConditionKey() + " / "
+                            + detail.displayName() + "§7)";
+                    ctx.getSource().sendFeedback(() -> Text.literal(line), false);
+                }
+                return 0;
+            }
+
+            return resolveMatchedCondition(ctx, target, keyMatches.get(0));
+
         } catch (Exception e) {
             ctx.getSource().sendError(Text.literal("Error: " + e.getMessage()));
             return 0;
         }
+    }
+
+    private static int resolveMatchedCondition(CommandContext<ServerCommandSource> ctx,
+                                               ServerPlayerEntity target,
+                                               MedicalService.ConditionDetail detail) {
+        String gmUuid = ctx.getSource().getEntity() instanceof ServerPlayerEntity gm
+                ? gm.getUuidAsString()
+                : "server";
+
+        LongTermInjury condition = detail.condition();
+        SecondDawnRP.MEDICAL_SERVICE.forceResolve(condition.getInjuryId(), gmUuid);
+
+        ctx.getSource().sendFeedback(
+                () -> Text.literal("[Medical] Cleared '")
+                        .formatted(Formatting.GREEN)
+                        .append(Text.literal(detail.displayName()).formatted(Formatting.YELLOW))
+                        .append(Text.literal("' from ").formatted(Formatting.GREEN))
+                        .append(Text.literal(target.getName().getString()).formatted(Formatting.YELLOW))
+                        .append(Text.literal(" §7(ID: " + condition.getInjuryId() + ")").formatted(Formatting.GRAY)),
+                true);
+        return 1;
     }
 
     // ── List active conditions on a player ────────────────────────────────────
@@ -181,20 +274,22 @@ public final class GmMedicalCommands {
             }
 
             for (MedicalService.ConditionDetail detail : details) {
-                LongTermInjury c  = detail.condition();
-                String name       = detail.displayName();
-                String colour     = detail.severityColour();
-                String id         = c.getInjuryId();
-                String applied    = DATE_FMT.format(Instant.ofEpochMilli(c.getAppliedAtMs()));
+                LongTermInjury c = detail.condition();
+                String name = detail.displayName();
+                String colour = detail.severityColour();
+                String id = c.getInjuryId();
+                String key = c.getConditionKey();
+                String applied = DATE_FMT.format(Instant.ofEpochMilli(c.getAppliedAtMs()));
 
                 int totalSteps = detail.template() != null
-                        ? detail.template().treatmentPlan().size() : 0;
-                int doneSteps  = totalSteps - detail.pendingSteps().size();
-                String steps   = totalSteps > 0
-                        ? " [" + doneSteps + "/" + totalSteps + " steps]" : "";
+                        ? detail.template().treatmentPlan().size()
+                        : 0;
+                int doneSteps = totalSteps - detail.pendingSteps().size();
+                String steps = totalSteps > 0
+                        ? " [" + doneSteps + "/" + totalSteps + " steps]"
+                        : "";
                 String readyTag = detail.isReadyToResolve() ? " §a✔ READY TO RESOLVE§r" : "";
 
-                // Resolve applied-by UUID to player name
                 String appliedByDisplay = resolvePlayerName(ctx, c.getAppliedBy());
                 final String appliedByFinal = appliedByDisplay;
 
@@ -202,6 +297,7 @@ public final class GmMedicalCommands {
                         () -> Text.literal(
                                 "  " + colour + name + "§r" + steps + readyTag + "\n"
                                         + "  §7ID: §f" + id + "\n"
+                                        + "  §7Key: §f" + key + "\n"
                                         + "  §7Applied: §f" + applied
                                         + (appliedByFinal != null ? " §7by §f" + appliedByFinal : "")
                                         + (c.getNotes() != null ? "\n  §7Note: §f" + c.getNotes() : "")),
@@ -226,7 +322,6 @@ public final class GmMedicalCommands {
                                     + all.size() + " conditions) ═══")
                             .formatted(Formatting.AQUA), false);
 
-            // Group by severity
             for (MedicalConditionTemplate.Severity severity :
                     MedicalConditionTemplate.Severity.values()) {
                 List<MedicalConditionTemplate> group =
@@ -242,7 +337,7 @@ public final class GmMedicalCommands {
                     boolean hasTiming = t.treatmentPlan().stream()
                             .anyMatch(MedicalConditionTemplate.TreatmentStep::hasTiming);
                     String timedTag = hasTiming ? " §b[timed]§r" : "";
-                    String surgTag  = t.requiresSurgery() ? " §d[surgeon]§r" : "";
+                    String surgTag = t.requiresSurgery() ? " §d[surgeon]§r" : "";
 
                     ctx.getSource().sendFeedback(
                             () -> Text.literal(
@@ -271,7 +366,8 @@ public final class GmMedicalCommands {
             int count = SecondDawnRP.MEDICAL_CONDITION_REGISTRY.getAll().size();
             ctx.getSource().sendFeedback(
                     () -> Text.literal("[Medical] Registry reloaded — " + count + " conditions.")
-                            .formatted(Formatting.GREEN), true);
+                            .formatted(Formatting.GREEN),
+                    true);
             return 1;
         } catch (Exception e) {
             ctx.getSource().sendError(Text.literal("Error reloading registry: " + e.getMessage()));
@@ -285,13 +381,12 @@ public final class GmMedicalCommands {
                                             String uuidStr) {
         if (uuidStr == null) return null;
         try {
-            java.util.UUID uuid = java.util.UUID.fromString(uuidStr);
+            UUID uuid = UUID.fromString(uuidStr);
             ServerPlayerEntity p = ctx.getSource().getServer()
                     .getPlayerManager().getPlayer(uuid);
-            return p != null ? p.getName().getString()
-                    : uuidStr.substring(0, 8) + "…";
+            return p != null ? p.getName().getString() : uuidStr.substring(0, 8) + "…";
         } catch (IllegalArgumentException e) {
-            return uuidStr; // "server" or other non-UUID
+            return uuidStr;
         }
     }
 }

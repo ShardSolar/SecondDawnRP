@@ -1,0 +1,48 @@
+{
+  "key": "pathogen_exposure",
+  "displayName": "Pathogen Exposure",
+  "severity": "CHRONIC",
+  "requiresSurgery": false,
+  "description": "The patient has been exposed to an infectious biological agent. The pathogen must be identified and treated before systemic complications develop.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:hunger",
+      "amplifier": 0,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 0,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 20,
+    "reapplyCooldownSeconds": 120,
+    "clearOnUse": false
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "bio_scan",
+      "label": "Perform Bio-Scan",
+      "item": "minecraft:paper",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "broad_antimicrobial",
+      "label": "Administer Broad Antimicrobial",
+      "item": "minecraft:spider_eye",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "immune_stabiliser",
+      "label": "Administer Immune Stabilizer",
+      "item": "minecraft:golden_carrot",
+      "quantity": 1,
+      "requiresSurgery": false
+    }
+  ]
+}

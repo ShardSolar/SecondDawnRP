@@ -1,0 +1,60 @@
+{
+  "key": "field_flux_syndrome",
+  "displayName": "Field Flux Syndrome",
+  "severity": "CRITICAL",
+  "requiresSurgery": false,
+  "description": "Exposure to unstable energy fields has disrupted the patient’s bioelectrical equilibrium. Stabilization must be performed before the condition escalates.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:nausea",
+      "amplifier": 1,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:glowing",
+      "amplifier": 0,
+      "durationTicks": 600
+    }
+  ],
+  "milkInteraction": {
+    "allowed": false,
+    "suppressionSeconds": 0,
+    "reapplyCooldownSeconds": 0,
+    "clearOnUse": false
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "field_scan",
+      "label": "Perform Bioelectric Scan",
+      "item": "minecraft:paper",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "phase_stabiliser",
+      "label": "Administer Phase Stabilizer",
+      "item": "minecraft:amethyst_shard",
+      "quantity": 2,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "neural_grounding",
+      "label": "Apply Neural Grounding",
+      "item": "minecraft:copper_ingot",
+      "quantity": 1,
+      "requiresSurgery": false,
+      "timing": {
+        "triggerFrom": "PREVIOUS_STEP",
+        "minSeconds": 30,
+        "maxSeconds": 180,
+        "showTimer": true,
+        "failureEffect": "minecraft:nausea:1:160"
+      }
+    }
+  ]
+}

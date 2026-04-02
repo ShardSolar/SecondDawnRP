@@ -1,0 +1,48 @@
+{
+  "key": "chemical_burn",
+  "displayName": "Chemical Burn",
+  "severity": "ACUTE",
+  "requiresSurgery": false,
+  "description": "Corrosive exposure has damaged tissue and caused persistent pain. The affected area must be neutralized and treated to prevent worsening injury.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 0,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:nausea",
+      "amplifier": 0,
+      "durationTicks": 100
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 25,
+    "reapplyCooldownSeconds": 90,
+    "clearOnUse": true
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "neutralize_agent",
+      "label": "Apply Neutralizing Agent",
+      "item": "minecraft:lime_dye",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "flush_residue",
+      "label": "Flush Chemical Residue",
+      "item": "minecraft:water_bucket",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "dermal_patch",
+      "label": "Apply Dermal Patch",
+      "item": "minecraft:white_wool",
+      "quantity": 2,
+      "requiresSurgery": false
+    }
+  ]
+}

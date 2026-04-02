@@ -14,37 +14,16 @@ import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.division.Division;
 import net.shard.seconddawnrp.gmevent.data.*;
 import net.shard.seconddawnrp.gmevent.repository.JsonTriggerRepository;
-import net.shard.seconddawnrp.tasksystem.data.OpsTaskStatus;
 import net.shard.seconddawnrp.tasksystem.data.TaskObjectiveType;
 
 import java.util.*;
 
-/**
- * Core service for Trigger Blocks.
- *
- * <p>Each server tick:
- * <ol>
- *   <li>For each armed RADIUS trigger, check if any player entered the radius
- *   <li>Apply per-player cooldown and FIRST_ENTRY logic
- *   <li>Execute all configured actions when triggered
- * </ol>
- *
- * <p>INTERACT triggers are fired directly by the block's right-click handler
- * via {@link #fireInteract(TriggerEntry, ServerPlayerEntity)}.
- */
 public class TriggerService {
 
     private final JsonTriggerRepository repository;
 
     private final Map<String, TriggerEntry> entries = new LinkedHashMap<>();
-
-    /**
-     * Per-player cooldown tracking.
-     * Key: entryId:playerUuid — Value: server tick when cooldown expires.
-     */
     private final Map<String, Long> cooldownExpiry = new HashMap<>();
-
-    /** Players currently in radius. Key: entryId, Value: set of UUIDs. */
     private final Map<String, Set<UUID>> playersInRadius = new HashMap<>();
 
     private long serverTick = 0;
@@ -86,9 +65,7 @@ public class TriggerService {
                 if (!player.getBlockPos().isWithinDistance(pos, radius)) continue;
                 nowIn.add(player.getUuid());
 
-                // Only trigger on entry (wasn't in radius last tick)
                 if (wasIn.contains(player.getUuid())) continue;
-
                 attemptFire(entry, player, server);
             }
 
@@ -96,7 +73,6 @@ public class TriggerService {
         }
     }
 
-    /** Called by the block's right-click handler for INTERACT mode. */
     public void fireInteract(TriggerEntry entry, ServerPlayerEntity player) {
         if (!entry.isArmed()) return;
         if (entry.getTriggerMode() != TriggerMode.INTERACT) return;
@@ -106,11 +82,9 @@ public class TriggerService {
     private void attemptFire(TriggerEntry entry, ServerPlayerEntity player, MinecraftServer server) {
         String cooldownKey = entry.getEntryId() + ":" + player.getUuid();
 
-        // Check cooldown
         long expiry = cooldownExpiry.getOrDefault(cooldownKey, 0L);
         if (serverTick < expiry) return;
 
-        // FIRST_ENTRY check
         if (entry.getFireMode() == TriggerFireMode.FIRST_ENTRY) {
             if (entry.isFirstEntryFired()) return;
             entry.setFirstEntryFired(true);
@@ -128,21 +102,22 @@ public class TriggerService {
 
         for (TriggerAction action : entry.getActions()) {
             switch (action.getType()) {
-                case BROADCAST      -> executeBroadcast(action.getPayload(), trigger, server);
-                case ACTIVATE_LINKED   -> executeToggleLinked(action.getPayload(), true);
-                case DEACTIVATE_LINKED -> executeToggleLinked(action.getPayload(), false);
-                case GENERATE_TASK  -> executeGenerateTask(action.getPayload());
-                case NOTIFY_GM      -> executeNotifyGm(action.getPayload(), trigger, pos, server);
-                case PLAY_SOUND     -> executePlaySound(action.getPayload(), pos,
-                        (ServerWorld) trigger.getWorld());
+                case BROADCAST -> executeBroadcast(action.getPayload(), trigger, server);
+                case ACTIVATE_LINKED -> executeToggleLinked(action.getPayload(), ToggleMode.ACTIVATE);
+                case DEACTIVATE_LINKED -> executeToggleLinked(action.getPayload(), ToggleMode.DEACTIVATE);
+                case TOGGLE_LINKED -> executeToggleLinked(action.getPayload(), ToggleMode.TOGGLE);
+                case GENERATE_TASK -> executeGenerateTask(action.getPayload());
+                case NOTIFY_GM -> executeNotifyGm(action.getPayload(), trigger, pos, server);
+                case PLAY_SOUND -> executePlaySound(action.getPayload(), pos, (ServerWorld) trigger.getWorld());
+                case APPLY_MEDICAL_CONDITION -> executeApplyMedicalCondition(action.getPayload(), trigger, pos);
             }
         }
     }
 
     private void executeBroadcast(String payload, ServerPlayerEntity trigger, MinecraftServer server) {
-        // Format: "CHANNEL:message"
         int sep = payload.indexOf(':');
         if (sep < 0) return;
+
         String channel = payload.substring(0, sep).trim().toUpperCase();
         String message = payload.substring(sep + 1).trim();
 
@@ -156,48 +131,72 @@ public class TriggerService {
                             || SecondDawnRP.PERMISSION_SERVICE.hasPermission(p, "st.gm.use"))
                     .forEach(p -> p.sendMessage(msg, false));
             default -> {
-                // DIVISION:id format
                 if (channel.startsWith("DIVISION:")) {
                     String divName = channel.substring(9);
                     try {
                         Division div = Division.valueOf(divName);
                         server.getPlayerManager().getPlayerList().stream()
                                 .filter(p -> {
-                                    var profile = SecondDawnRP.PROFILE_MANAGER
-                                            .getLoadedProfile(p.getUuid());
+                                    var profile = SecondDawnRP.PROFILE_MANAGER.getLoadedProfile(p.getUuid());
                                     return profile != null && div.equals(profile.getDivision());
                                 })
                                 .forEach(p -> p.sendMessage(msg, false));
-                    } catch (IllegalArgumentException ignored) {}
+                    } catch (IllegalArgumentException ignored) {
+                    }
                 }
             }
         }
     }
 
-    private void executeToggleLinked(String payload, boolean activate) {
+    private enum ToggleMode {
+        ACTIVATE,
+        DEACTIVATE,
+        TOGGLE
+    }
+
+    private void executeToggleLinked(String payload, ToggleMode mode) {
         if (payload == null || payload.isBlank()) return;
+
         for (String id : payload.split(",")) {
             String trimmed = id.trim();
-            if (!trimmed.isEmpty()) {
-                SecondDawnRP.ENV_EFFECT_SERVICE.toggle(trimmed, activate);
+            if (trimmed.isEmpty()) continue;
+
+            switch (mode) {
+                case ACTIVATE -> SecondDawnRP.ENV_EFFECT_SERVICE.toggle(trimmed, true);
+                case DEACTIVATE -> SecondDawnRP.ENV_EFFECT_SERVICE.toggle(trimmed, false);
+                case TOGGLE -> {
+                    var opt = SecondDawnRP.ENV_EFFECT_SERVICE.getById(trimmed);
+                    opt.ifPresent(entry ->
+                            SecondDawnRP.ENV_EFFECT_SERVICE.toggle(trimmed, !entry.isActive()));
+                }
             }
         }
     }
 
     private void executeGenerateTask(String payload) {
-        // Format: "displayName|description|divisionName"
         String[] parts = payload.split("\\|", 3);
         if (parts.length < 3) return;
+
         String displayName = parts[0].trim();
         String description = parts[1].trim();
-        String divName     = parts[2].trim();
+        String divName = parts[2].trim();
+
         try {
             Division div = Division.valueOf(divName.toUpperCase());
             SecondDawnRP.TASK_SERVICE.createPoolTask(
                     "trigger_task_" + Long.toHexString(System.currentTimeMillis() & 0xFFFFFFL),
-                    displayName, description, div,
-                    TaskObjectiveType.MANUAL_CONFIRM, "trigger", 1, 25, false, null);
-        } catch (IllegalArgumentException ignored) {}
+                    displayName,
+                    description,
+                    div,
+                    TaskObjectiveType.MANUAL_CONFIRM,
+                    "trigger",
+                    1,
+                    25,
+                    false,
+                    null
+            );
+        } catch (IllegalArgumentException ignored) {
+        }
     }
 
     private void executeNotifyGm(String payload, ServerPlayerEntity trigger,
@@ -206,6 +205,7 @@ public class TriggerService {
                         + " | Player: " + trigger.getName().getString()
                         + " | Pos: " + pos.getX() + "," + pos.getY() + "," + pos.getZ())
                 .formatted(Formatting.RED);
+
         server.getPlayerManager().getPlayerList().stream()
                 .filter(p -> p.hasPermissionLevel(2)
                         || SecondDawnRP.PERMISSION_SERVICE.hasPermission(p, "st.gm.use"))
@@ -213,17 +213,52 @@ public class TriggerService {
     }
 
     private void executePlaySound(String payload, BlockPos pos, ServerWorld world) {
-        // Format: "namespace:path:volume:pitch"
         String[] parts = payload.split(":");
         if (parts.length < 2) return;
-        String ns   = parts[0];
+
+        String ns = parts[0];
         String path = parts[1];
         float volume = parts.length > 2 ? parseFloat(parts[2], 1.0f) : 1.0f;
-        float pitch  = parts.length > 3 ? parseFloat(parts[3], 1.0f) : 1.0f;
+        float pitch = parts.length > 3 ? parseFloat(parts[3], 1.0f) : 1.0f;
 
         SoundEvent sound = Registries.SOUND_EVENT.get(Identifier.of(ns, path));
         if (sound == null) return;
+
         world.playSound(null, pos, sound, SoundCategory.BLOCKS, volume, pitch);
+    }
+
+    private void executeApplyMedicalCondition(String payload,
+                                              ServerPlayerEntity trigger,
+                                              BlockPos pos) {
+        if (payload == null || payload.isBlank()) return;
+        if (SecondDawnRP.MEDICAL_SERVICE == null) return;
+        if (SecondDawnRP.MEDICAL_CONDITION_REGISTRY == null) return;
+
+        String[] parts = payload.split("\\|", 2);
+        String conditionKey = parts[0].trim();
+        String note = parts.length > 1 && !parts[1].trim().isBlank()
+                ? parts[1].trim()
+                : "Trigger hazard at " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+
+        if (!SecondDawnRP.MEDICAL_CONDITION_REGISTRY.exists(conditionKey)) {
+            return;
+        }
+
+        boolean alreadyActive = SecondDawnRP.MEDICAL_SERVICE.getActiveConditions(trigger.getUuid()).stream()
+                .map(detail -> detail.condition().getConditionKey())
+                .anyMatch(conditionKey::equals);
+
+        if (alreadyActive) return;
+
+        String appliedBy = "trigger";
+        SecondDawnRP.MEDICAL_SERVICE.applyCondition(
+                trigger.getUuid(),
+                conditionKey,
+                null,
+                null,
+                note,
+                appliedBy
+        );
     }
 
     // ── Registration ──────────────────────────────────────────────────────────
@@ -255,7 +290,7 @@ public class TriggerService {
         TriggerEntry e = entries.get(entryId);
         if (e == null) return false;
         e.setArmed(armed);
-        if (!armed) e.setFirstEntryFired(false); // reset on disarm
+        if (!armed) e.setFirstEntryFired(false);
         repository.save(entries.values());
         return true;
     }
@@ -275,8 +310,14 @@ public class TriggerService {
 
     // ── Queries ───────────────────────────────────────────────────────────────
 
-    public Collection<TriggerEntry> getAll()                    { return entries.values(); }
-    public Optional<TriggerEntry> getById(String id)            { return Optional.ofNullable(entries.get(id)); }
+    public Collection<TriggerEntry> getAll() {
+        return entries.values();
+    }
+
+    public Optional<TriggerEntry> getById(String id) {
+        return Optional.ofNullable(entries.get(id));
+    }
+
     public Optional<TriggerEntry> getByPosition(String wk, long pos) {
         return entries.values().stream()
                 .filter(e -> e.getWorldKey().equals(wk) && e.getBlockPosLong() == pos)
@@ -286,12 +327,17 @@ public class TriggerService {
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static ServerWorld resolveWorld(MinecraftServer server, String worldKey) {
-        for (ServerWorld w : server.getWorlds())
+        for (ServerWorld w : server.getWorlds()) {
             if (w.getRegistryKey().getValue().toString().equals(worldKey)) return w;
+        }
         return null;
     }
 
     private static float parseFloat(String s, float def) {
-        try { return Float.parseFloat(s); } catch (NumberFormatException e) { return def; }
+        try {
+            return Float.parseFloat(s);
+        } catch (NumberFormatException e) {
+            return def;
+        }
     }
 }

@@ -3,19 +3,21 @@ package net.shard.seconddawnrp.gmevent.data;
 /**
  * A single configurable action attached to a Trigger Block.
  * payload format per type:
- *   BROADCAST         — "CHANNEL:message"  (CHANNEL = ALL, DIVISION:id, GM_ONLY)
- *   ACTIVATE_LINKED   — comma-separated env effect entry IDs
- *   DEACTIVATE_LINKED — comma-separated env effect entry IDs
- *   GENERATE_TASK     — "displayName|description|divisionName"
- *   NOTIFY_GM         — notification message text
- *   PLAY_SOUND        — "namespace:path:volume:pitch"
+ *   BROADCAST               — "CHANNEL:message"  (CHANNEL = ALL, DIVISION:id, GM_ONLY)
+ *   ACTIVATE_LINKED         — comma-separated env effect entry IDs
+ *   DEACTIVATE_LINKED       — comma-separated env effect entry IDs
+ *   TOGGLE_LINKED           — comma-separated env effect entry IDs
+ *   GENERATE_TASK           — "displayName|description|divisionName"
+ *   NOTIFY_GM               — notification message text
+ *   PLAY_SOUND              — "namespace:path:volume:pitch"
+ *   APPLY_MEDICAL_CONDITION — "conditionKey" or "conditionKey|note"
  */
 public class TriggerAction {
     private final TriggerActionType type;
     private String payload;
 
     public TriggerAction(TriggerActionType type, String payload) {
-        this.type    = type;
+        this.type = type;
         this.payload = payload;
     }
 

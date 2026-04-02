@@ -5,11 +5,13 @@ import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.gui.screen.ingame.HandledScreens;
 import net.shard.seconddawnrp.character.CharacterCreationClientHandler;
 import net.shard.seconddawnrp.degradation.client.ComponentWarningClientHandler;
+import net.shard.seconddawnrp.degradation.client.EngineeringPadClientHandler;
 import net.shard.seconddawnrp.dice.network.SubmissionClientHandler;
 import net.shard.seconddawnrp.dice.screen.RpPaddClientHandler;
 import net.shard.seconddawnrp.gmevent.client.AnomalyClientHandler;
-import net.shard.seconddawnrp.gmevent.client.GmKeybindings;
 import net.shard.seconddawnrp.gmevent.client.GmKeyInputHandler;
+import net.shard.seconddawnrp.gmevent.client.GmKeybindings;
+import net.shard.seconddawnrp.gmevent.client.ToolVisibilityClientHandler;
 import net.shard.seconddawnrp.gmevent.network.GmToolRefreshS2CPacket;
 import net.shard.seconddawnrp.gmevent.screen.SpawnConfigScreen;
 import net.shard.seconddawnrp.gmevent.screen.SpawnItemScreen;
@@ -34,23 +36,26 @@ public class SecondDawnRPClient implements ClientModInitializer {
         HandledScreens.register(ModScreenHandlers.TERMINAL_SCREEN, TerminalScreen::new);
         HandledScreens.register(ModScreenHandlers.SPAWN_CONFIG_SCREEN, SpawnConfigScreen::new);
         HandledScreens.register(ModScreenHandlers.SPAWN_ITEM_SCREEN, SpawnItemScreen::new);
-        ComponentWarningClientHandler.register();
+
+
         WarpCoreClientHandler.register();
         net.shard.seconddawnrp.gmevent.client.EnvEffectClientHandler.register();
         net.shard.seconddawnrp.gmevent.client.TriggerClientHandler.register();
-        net.shard.seconddawnrp.gmevent.client.ToolVisibilityClientHandler.register();
+        ToolVisibilityClientHandler.register();
         AnomalyClientHandler.register();
         CharacterCreationClientHandler.register();
-        ComponentWarningClientHandler.registerLocateReceiver();
         RpPaddClientHandler.register();
         SubmissionClientHandler.register();
         AnomalyClientHandler.registerServerReceiver();
+        EngineeringPadClientHandler.register();
 
         net.shard.seconddawnrp.medical.client.MedicalPadClientHandler.registerClientReceiver();
-        net.minecraft.client.gui.screen.ingame.HandledScreens.register(
+
+        HandledScreens.register(
                 net.shard.seconddawnrp.registry.ModScreenHandlers.ROSTER_SCREEN,
                 net.shard.seconddawnrp.roster.screen.RosterScreen::new
         );
+
         // GM keybindings
         GmKeybindings.register();
         GmKeyInputHandler.register();

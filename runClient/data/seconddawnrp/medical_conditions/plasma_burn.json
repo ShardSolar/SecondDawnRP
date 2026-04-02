@@ -1,0 +1,55 @@
+{
+  "key": "plasma_burns",
+  "displayName": "Plasma Burns",
+  "severity": "CRITICAL",
+  "requiresSurgery": true,
+  "description": "Severe thermal and plasma-induced tissue damage. Burn treatment must begin immediately, and surgical intervention may be required to fully recover the patient.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:nausea",
+      "amplifier": 0,
+      "durationTicks": 200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 45,
+    "reapplyCooldownSeconds": 120,
+    "clearOnUse": true
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "coolant_gel",
+      "label": "Apply Coolant Gel",
+      "item": "minecraft:blue_dye",
+      "quantity": 2,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "debride",
+      "label": "Debride Burned Tissue",
+      "item": "minecraft:shears",
+      "quantity": 1,
+      "requiresSurgery": true,
+      "timing": {
+        "triggerFrom": "PREVIOUS_STEP",
+        "minSeconds": 60,
+        "maxSeconds": 240,
+        "showTimer": true,
+        "failureEffect": "minecraft:nausea:1:200"
+      }
+    },
+    {
+      "stepKey": "dermal_regen",
+      "label": "Apply Dermal Regenerator",
+      "item": "minecraft:iron_ingot",
+      "quantity": 2,
+      "requiresSurgery": false
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "key": "neural_toxin",
+  "displayName": "Neural Toxin",
+  "severity": "CRITICAL",
+  "requiresSurgery": false,
+  "description": "A neurotoxic compound is disrupting higher brain function and motor control. Immediate antidote protocol is required.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:nausea",
+      "amplifier": 0,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:slowness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 20,
+    "reapplyCooldownSeconds": 120,
+    "clearOnUse": true
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "neural_scan",
+      "label": "Perform Neural Toxicity Scan",
+      "item": "minecraft:paper",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "antidote",
+      "label": "Administer Neural Antidote",
+      "item": "minecraft:fermented_spider_eye",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "stabilise_synapses",
+      "label": "Stabilise Synaptic Function",
+      "item": "minecraft:amethyst_shard",
+      "quantity": 1,
+      "requiresSurgery": false,
+      "timing": {
+        "triggerFrom": "PREVIOUS_STEP",
+        "minSeconds": 30,
+        "maxSeconds": 180,
+        "showTimer": true,
+        "failureEffect": "minecraft:blindness:0:100"
+      }
+    }
+  ]
+}

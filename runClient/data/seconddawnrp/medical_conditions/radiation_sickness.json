@@ -1,0 +1,55 @@
+{
+  "key": "radiation_sickness",
+  "displayName": "Radiation Sickness",
+  "severity": "CHRONIC",
+  "requiresSurgery": false,
+  "description": "Systemic cellular damage caused by ionising radiation exposure. Anti-radiation treatment must be carefully staged to prevent metabolic shock.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 0,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:hunger",
+      "amplifier": 0,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 30,
+    "reapplyCooldownSeconds": 180,
+    "clearOnUse": true
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "anti_rad_dose_1",
+      "label": "Administer Anti-Radiation Compound",
+      "item": "minecraft:potion",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "cellular_flush",
+      "label": "Begin Cellular Detox Flush",
+      "item": "minecraft:golden_carrot",
+      "quantity": 1,
+      "requiresSurgery": false,
+      "timing": {
+        "triggerFrom": "PREVIOUS_STEP",
+        "minSeconds": 120,
+        "maxSeconds": 360,
+        "showTimer": true,
+        "failureEffect": "minecraft:poison:0:120"
+      }
+    },
+    {
+      "stepKey": "stabiliser",
+      "label": "Administer Cellular Stabiliser",
+      "item": "minecraft:golden_apple",
+      "quantity": 1,
+      "requiresSurgery": false
+    }
+  ]
+}

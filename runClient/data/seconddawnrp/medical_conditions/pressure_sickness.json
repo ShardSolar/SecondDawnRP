@@ -1,0 +1,55 @@
+{
+  "key": "pressure_sickness",
+  "displayName": "Pressure Sickness",
+  "severity": "CRITICAL",
+  "requiresSurgery": false,
+  "description": "Rapid environmental pressure change has caused systemic decompression stress. The patient requires staged pressure stabilization and supportive treatment.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:slowness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": false,
+    "suppressionSeconds": 0,
+    "reapplyCooldownSeconds": 0,
+    "clearOnUse": false
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "pressure_stabilisation",
+      "label": "Stabilize Pressure Differential",
+      "item": "minecraft:copper_ingot",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "circulation_support",
+      "label": "Administer Circulatory Support",
+      "item": "minecraft:honey_bottle",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "monitor_recompression",
+      "label": "Monitor Recompression Recovery",
+      "item": "minecraft:clock",
+      "quantity": 1,
+      "requiresSurgery": false,
+      "timing": {
+        "triggerFrom": "PREVIOUS_STEP",
+        "minSeconds": 60,
+        "maxSeconds": 240,
+        "showTimer": true,
+        "failureEffect": "minecraft:poison:0:100"
+      }
+    }
+  ]
+}

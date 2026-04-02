@@ -1,0 +1,55 @@
+{
+  "key": "oxygen_deprivation",
+  "displayName": "Oxygen Deprivation",
+  "severity": "CRITICAL",
+  "requiresSurgery": false,
+  "description": "The patient has suffered severe oxygen loss, resulting in systemic instability and impaired consciousness. Immediate respiratory support is required.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 1,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:mining_fatigue",
+      "amplifier": 1,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": false,
+    "suppressionSeconds": 0,
+    "reapplyCooldownSeconds": 0,
+    "clearOnUse": false
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "oxygen_support",
+      "label": "Provide Emergency Oxygen",
+      "item": "minecraft:glass_bottle",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "stabilise_breathing",
+      "label": "Stabilize Respiration",
+      "item": "minecraft:feather",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "circulatory_support",
+      "label": "Administer Circulatory Support",
+      "item": "minecraft:honey_bottle",
+      "quantity": 1,
+      "requiresSurgery": false,
+      "timing": {
+        "triggerFrom": "PREVIOUS_STEP",
+        "minSeconds": 15,
+        "maxSeconds": 120,
+        "showTimer": true,
+        "failureEffect": "minecraft:slowness:2:120"
+      }
+    }
+  ]
+}

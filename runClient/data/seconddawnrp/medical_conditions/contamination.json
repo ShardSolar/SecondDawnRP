@@ -1,0 +1,48 @@
+{
+  "key": "contamination",
+  "displayName": "Contamination",
+  "severity": "CHRONIC",
+  "requiresSurgery": false,
+  "description": "The patient has been contaminated by hazardous material or unknown residue. Decontamination and detox treatment are required before the condition can be cleared.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:hunger",
+      "amplifier": 0,
+      "durationTicks": 7200
+    },
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 0,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 15,
+    "reapplyCooldownSeconds": 90,
+    "clearOnUse": false
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "decontaminate",
+      "label": "Run Decontamination Cycle",
+      "item": "minecraft:water_bucket",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "toxin_scrub",
+      "label": "Administer Toxin Scrub",
+      "item": "minecraft:charcoal",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "detox_support",
+      "label": "Administer Detox Support",
+      "item": "minecraft:potion",
+      "quantity": 1,
+      "requiresSurgery": false
+    }
+  ]
+}

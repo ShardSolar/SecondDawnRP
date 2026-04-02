@@ -1,0 +1,48 @@
+{
+  "key": "sonic_trauma",
+  "displayName": "Sonic Trauma",
+  "severity": "ACUTE",
+  "requiresSurgery": false,
+  "description": "Acute neurological and vestibular disruption caused by extreme sonic exposure. Symptoms include disorientation, nausea, and reduced coordination.",
+  "activeEffects": [
+    {
+      "effect": "minecraft:nausea",
+      "amplifier": 0,
+      "durationTicks": 300
+    },
+    {
+      "effect": "minecraft:weakness",
+      "amplifier": 0,
+      "durationTicks": 7200
+    }
+  ],
+  "milkInteraction": {
+    "allowed": true,
+    "suppressionSeconds": 20,
+    "reapplyCooldownSeconds": 60,
+    "clearOnUse": true
+  },
+  "treatmentPlan": [
+    {
+      "stepKey": "auditory_scan",
+      "label": "Perform Auditory Scan",
+      "item": "minecraft:paper",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "neural_stabiliser",
+      "label": "Administer Neural Stabilizer",
+      "item": "minecraft:amethyst_shard",
+      "quantity": 1,
+      "requiresSurgery": false
+    },
+    {
+      "stepKey": "recovery_monitoring",
+      "label": "Begin Recovery Monitoring",
+      "item": "minecraft:clock",
+      "quantity": 1,
+      "requiresSurgery": false
+    }
+  ]
+}
