@@ -7,14 +7,23 @@ import net.shard.seconddawnrp.tactical.data.ShipState.ShieldFacing;
 
 /**
  * Handles shield regeneration, suppression ticking, and power-scaled maximums.
+ *
+ * If zone.shield_emit is destroyed on a ship, regen rate is halved.
+ * This is checked via HullDamageService.isShieldEmitDestroyed() each tick.
  */
 public class ShieldService {
 
     private static final int REGEN_SUPPRESSION_TICKS = 10;
 
-    /**
-     * Called every encounter tick — ticks down suppression and regenerates shields.
-     */
+    private HullDamageService hullDamageService;
+
+    public ShieldService() {}
+
+    /** Called by TacticalService after HullDamageService is constructed. */
+    public void setHullDamageService(HullDamageService hullDamageService) {
+        this.hullDamageService = hullDamageService;
+    }
+
     public void tick(EncounterState encounter) {
         for (ShipState ship : encounter.getAllShips()) {
             if (ship.isDestroyed()) continue;
@@ -27,14 +36,20 @@ public class ShieldService {
         ShipClassDefinition def = ShipClassDefinition.get(ship.getShipClass()).orElse(null);
         if (def == null) return;
 
-        // Shield regen requires shieldsPower above minimum threshold (20%)
         if (ship.getShieldsPower() < ship.getPowerBudget() * 0.2f) return;
 
         int regenRate = def.getShieldRegenRate();
+
+        // Halve regen if shield emitter is destroyed
+        if (hullDamageService != null
+                && hullDamageService.isShieldEmitDestroyed(ship.getShipId())) {
+            regenRate = Math.max(1, regenRate / 2);
+        }
+
         int maxPerFacing = getMaxShieldPerFacing(ship, def);
 
         for (ShieldFacing facing : ShieldFacing.values()) {
-            if (ship.getSuppression(facing) > 0) continue; // suppressed
+            if (ship.getSuppression(facing) > 0) continue;
             int current = ship.getShield(facing);
             if (current < maxPerFacing) {
                 ship.setShield(facing, Math.min(maxPerFacing, current + regenRate));
@@ -42,25 +57,15 @@ public class ShieldService {
         }
     }
 
-    /**
-     * Max shield HP per facing scales with shieldsPower allocation.
-     */
     public int getMaxShieldPerFacing(ShipState ship, ShipClassDefinition def) {
         if (ship.getPowerBudget() <= 0) return 0;
-        float powerFraction = (float) ship.getShieldsPower() / ship.getPowerBudget();
+        float powerFraction = (float)ship.getShieldsPower() / ship.getPowerBudget();
         return (int)(def.getShieldMax() * Math.max(0.1f, powerFraction));
     }
 
-    /**
-     * Apply damage to a shield facing. Excess damage bleeds to hull.
-     * Returns any excess damage that passed through to hull.
-     */
     public int applyShieldDamage(ShipState ship, ShieldFacing facing, int damage) {
         int current = ship.getShield(facing);
-        if (current <= 0) {
-            // Shield already down — all damage goes to hull
-            return damage;
-        }
+        if (current <= 0) return damage;
 
         int excess = 0;
         if (damage > current) {
@@ -70,16 +75,12 @@ public class ShieldService {
             ship.setShield(facing, current - damage);
         }
 
-        // Apply regen suppression on this facing
         ship.setSuppression(facing, REGEN_SUPPRESSION_TICKS);
         return excess;
     }
 
-    /**
-     * Redistribute shield power across facings.
-     * Values are percentages of total shields budget — normalized automatically.
-     */
-    public void redistributeShields(ShipState ship, int fore, int aft, int port, int starboard) {
+    public void redistributeShields(ShipState ship, int fore, int aft,
+                                    int port, int starboard) {
         int total = fore + aft + port + starboard;
         if (total <= 0) return;
 
@@ -87,11 +88,13 @@ public class ShieldService {
         if (def == null) return;
 
         int maxTotal = getMaxShieldPerFacing(ship, def) * 4;
-
-        // Cap each facing proportionally
-        ship.setShield(ShieldFacing.FORE,      Math.min(ship.getShield(ShieldFacing.FORE),      maxTotal * fore / total));
-        ship.setShield(ShieldFacing.AFT,       Math.min(ship.getShield(ShieldFacing.AFT),       maxTotal * aft / total));
-        ship.setShield(ShieldFacing.PORT,      Math.min(ship.getShield(ShieldFacing.PORT),      maxTotal * port / total));
-        ship.setShield(ShieldFacing.STARBOARD, Math.min(ship.getShield(ShieldFacing.STARBOARD), maxTotal * starboard / total));
+        ship.setShield(ShieldFacing.FORE,
+                Math.min(ship.getShield(ShieldFacing.FORE),      maxTotal * fore / total));
+        ship.setShield(ShieldFacing.AFT,
+                Math.min(ship.getShield(ShieldFacing.AFT),       maxTotal * aft  / total));
+        ship.setShield(ShieldFacing.PORT,
+                Math.min(ship.getShield(ShieldFacing.PORT),      maxTotal * port / total));
+        ship.setShield(ShieldFacing.STARBOARD,
+                Math.min(ship.getShield(ShieldFacing.STARBOARD), maxTotal * starboard / total));
     }
 }

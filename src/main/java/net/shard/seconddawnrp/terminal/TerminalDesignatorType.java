@@ -38,15 +38,15 @@ public enum TerminalDesignatorType {
             false
     ),
 
-    // Phase 8 — Medical (implemented)
+    // Phase 8 — complete
     MEDICAL_CONSOLE(
             "Medical Console",
             "seconddawnrp.terminal.medical",
             0x2ECC71,
-            true   // was false — activated in Phase 8
+            true
     ),
 
-    // Phase 9 — planned
+    // Phase 10 — planned
     SECURITY_CONSOLE(
             "Security Console",
             "seconddawnrp.terminal.security",
@@ -78,12 +78,46 @@ public enum TerminalDesignatorType {
             false
     ),
 
-    // Phase 12 — planned
+    // Phase 12 — Tactical: full console (GM/Command opens GM console, crew gets read-only overview)
     TACTICAL_CONSOLE(
             "Tactical Console",
             "seconddawnrp.terminal.tactical",
             0xC0392B,
-            false
+            true
+    ),
+
+    // Phase 12 — Helm station: Navigation + Status panels, helm input active
+    TACTICAL_HELM(
+            "Helm Console",
+            "seconddawnrp.terminal.tactical.helm",
+            0x2980B9,
+            true
+    ),
+
+    // Phase 12 — Weapons station: Weapons + Status panels, fire controls active
+    TACTICAL_WEAPONS(
+            "Weapons Console",
+            "seconddawnrp.terminal.tactical.weapons",
+            0xC0392B,
+            true
+    ),
+
+    // Phase 12 — Shields station: Shields + Status panels, distribution controls active
+    TACTICAL_SHIELDS(
+            "Shields Console",
+            "seconddawnrp.terminal.tactical.shields",
+            0x2471A3,
+            true
+    ),
+
+    // Phase 12 — Ship origin marker for tactical map centering.
+    // No screen opens — purely positional. One per registered ship.
+    // Glows white so it's easy to spot during setup.
+    SHIP_ORIGIN(
+            "Ship Origin",
+            "seconddawnrp.terminal.ship_origin",
+            0xFFFFFF,
+            true
     );
 
     private final String displayName;

@@ -71,10 +71,10 @@ dependencies {
 loom {
     runs {
         client {
-            runDir = "runClient"
+            vmArgs "-Xmx5G", "-Xms1G", "-XX:MaxMetaspaceSize=512m"
         }
         server {
-            runDir = "runServer"
+            vmArgs "-Xmx5G", "-Xms1G", "-XX:MaxMetaspaceSize=512m"
         }
     }
 }

@@ -26,6 +26,9 @@ public class PowerService {
     }
 
     private void updatePowerBudget(ShipState ship) {
+        // If a GM has manually overridden power, skip the warp core read
+        if (ship.isManualPowerOverride()) return;
+
         // Read live power from WarpCoreService
         int rawOutput = 0;
         if (SecondDawnRP.WARP_CORE_SERVICE != null) {

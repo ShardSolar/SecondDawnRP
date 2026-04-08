@@ -85,6 +85,8 @@ import net.shard.seconddawnrp.registry.ModItems;
 import net.shard.seconddawnrp.registry.ModScreenHandlers;
 import net.shard.seconddawnrp.roster.data.RosterOpenData;
 import net.shard.seconddawnrp.roster.screen.RosterScreenHandler;
+import net.shard.seconddawnrp.tactical.network.LocateZoneBlockS2CPacket;
+import net.shard.seconddawnrp.tactical.network.TacticalNetworking;
 import net.shard.seconddawnrp.tasksystem.command.TaskCommands;
 import net.shard.seconddawnrp.tasksystem.event.TaskEventRegistrar;
 import net.shard.seconddawnrp.tasksystem.loader.TaskJsonLoader;
@@ -187,6 +189,7 @@ public class SecondDawnRP implements ModInitializer {
     public static TransporterService TRANSPORTER_SERVICE;
     public static net.shard.seconddawnrp.tactical.service.TacticalService TACTICAL_SERVICE;
     public static net.shard.seconddawnrp.tactical.service.EncounterService ENCOUNTER_SERVICE;
+    public static net.shard.seconddawnrp.tactical.data.PassiveShipMovementService PASSIVE_SHIP_MOVEMENT_SERVICE;
 
     // ── onInitialize ──────────────────────────────────────────────────────────
 
@@ -266,6 +269,9 @@ public class SecondDawnRP implements ModInitializer {
                             entries.add(ModItems.TRICORDER);
                             entries.add(ModItems.MEDICAL_PAD);
                             entries.add(ModItems.GURNEY);
+                            entries.add(ModItems.DAMAGE_ZONE_TOOL);
+                            entries.add(Item.fromBlock(ModBlocks.TACTICAL_CONSOLE));
+
                         })
                         .build()
         );
@@ -287,19 +293,26 @@ public class SecondDawnRP implements ModInitializer {
         try {
             net.shard.seconddawnrp.tactical.data.TacticalMigration
                     .applyVersion13(DATABASE_MANAGER.getConnection()); // V13
+            net.shard.seconddawnrp.tactical.data.TacticalMigration
+                    .applyVersion14(DATABASE_MANAGER.getConnection()); // V14 — ship_position table
         } catch (java.sql.SQLException e) {
-            throw new RuntimeException("Failed to apply V13 tactical migration", e);
+            throw new RuntimeException("Failed to apply tactical migrations", e);
         }
         net.shard.seconddawnrp.tactical.data.ShipClassDefinition
-                .loadAll(Path.of("data")); // loads data/seconddawnrp/ships/*.json
+                .loadAll(Path.of("data"));
 
         net.shard.seconddawnrp.tactical.data.TacticalRepository tacticalRepository =
                 new net.shard.seconddawnrp.tactical.data.TacticalRepository(DATABASE_MANAGER);
-
         ENCOUNTER_SERVICE = new net.shard.seconddawnrp.tactical.service.EncounterService(tacticalRepository);
-        TACTICAL_SERVICE  = new net.shard.seconddawnrp.tactical.service.TacticalService(ENCOUNTER_SERVICE);
+        TACTICAL_SERVICE = new net.shard.seconddawnrp.tactical.service.TacticalService(
+                ENCOUNTER_SERVICE, tacticalRepository);
+// Phase 12 — Passive ship movement
+        var passiveShipRepo = new net.shard.seconddawnrp.tactical.data.SqlShipPositionRepository(DATABASE_MANAGER);
+        PASSIVE_SHIP_MOVEMENT_SERVICE = new net.shard.seconddawnrp.tactical.data.PassiveShipMovementService(passiveShipRepo);
 
         net.shard.seconddawnrp.tactical.network.TacticalNetworking.registerPayloads();
+        net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry.playS2C()
+                .register(LocateZoneBlockS2CPacket.ID, LocateZoneBlockS2CPacket.CODEC);
         JsonTaskStateRepository jsonTaskStateRepository = new JsonTaskStateRepository(configDir);
         try { jsonTaskStateRepository.init(); }
         catch (Exception e) { throw new RuntimeException("Failed to initialize JSON task state backup", e); }
@@ -524,7 +537,6 @@ public class SecondDawnRP implements ModInitializer {
         OFFICER_SLOT_SERVICE        = new OfficerSlotService(officerSlotConfig, slotQueueRepo, PROFILE_MANAGER);
         OFFICER_PROGRESSION_SERVICE = new OfficerProgressionService(PROFILE_MANAGER, officerProgressionConfig);
         COMMENDATION_SERVICE        = new CommendationService(PROFILE_MANAGER, officerProgressionConfig);
-        SHIP_POSITION_SERVICE       = new ShipPositionService(PROFILE_MANAGER);
         GROUP_TASK_SERVICE          = new GroupTaskService(PROFILE_MANAGER);
         ROSTER_SERVICE = new net.shard.seconddawnrp.roster.service.RosterService(PROFILE_MANAGER);
         net.shard.seconddawnrp.roster.network.RosterNetworking.registerPayloads();
@@ -594,13 +606,12 @@ public class SecondDawnRP implements ModInitializer {
                 LONG_TERM_INJURY_SERVICE.tick(server, server.getTicks()));
         ServerTickEvents.END_SERVER_TICK.register(server ->
                 ROLL_SERVICE.tick(server, server.getTicks()));
-        ServerTickEvents.END_SERVER_TICK.register(server -> {
-            if (server.getTicks() % 10 != 0) return;
-            for (var player : server.getPlayerManager().getPlayerList()) {
-                GM_TOOL_VISIBILITY_SERVICE.onEquip(player, player.getMainHandStack());
-                TERMINAL_DESIGNATOR_SERVICE.tickGlowForPlayer(player);
-                TERMINAL_DESIGNATOR_SERVICE.tickActionBarPrompt(player);
 
+
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            if (server.getTicks() % 200 != 0) return; // every 10s
+            for (var player : server.getPlayerManager().getPlayerList()) {
+                TacticalNetworking.sendStandbyUpdate(player);
             }
         });
         ServerTickEvents.END_SERVER_TICK.register(server ->
@@ -608,6 +619,20 @@ public class SecondDawnRP implements ModInitializer {
         ServerTickEvents.END_SERVER_TICK.register(server -> {
             if (server.getTicks() % 1_728_000 == 0 && server.getTicks() > 0) {
                 RP_PADD_SUBMISSION_SERVICE.cleanup();
+            }
+        });
+
+        ServerTickEvents.END_SERVER_TICK.register(srv -> {
+            if (srv.getTicks() % 600 != 0) return;
+            if (PASSIVE_SHIP_MOVEMENT_SERVICE != null) {
+                PASSIVE_SHIP_MOVEMENT_SERVICE.onPassiveTick(srv);
+            }
+        });
+
+        ServerTickEvents.END_SERVER_TICK.register(srv -> {
+            if (srv.getTicks() % 200 != 0) return;
+            for (var player : srv.getPlayerManager().getPlayerList()) {
+                net.shard.seconddawnrp.tactical.network.TacticalNetworking.sendStandbyUpdate(player);
             }
         });
 
@@ -658,7 +683,11 @@ public class SecondDawnRP implements ModInitializer {
             RP_PADD_SUBMISSION_SERVICE.setServer(server);
             ENCOUNTER_SERVICE.setServer(server);
             TACTICAL_SERVICE.setServer(server);
+            if (PASSIVE_SHIP_MOVEMENT_SERVICE != null) {
+                PASSIVE_SHIP_MOVEMENT_SERVICE.loadHomeShip();
+            }
             ENCOUNTER_SERVICE.loadFromDatabase();
+            TACTICAL_SERVICE.loadFromDatabase();
             net.shard.seconddawnrp.tactical.network.TacticalNetworking.registerServerReceivers();
 
             // Phase 5.25
@@ -673,7 +702,9 @@ public class SecondDawnRP implements ModInitializer {
             OFFICER_SLOT_SERVICE.setServer(server);
             OFFICER_PROGRESSION_SERVICE.setServer(server);
             COMMENDATION_SERVICE.setServer(server);
-            SHIP_POSITION_SERVICE.setServer(server);
+            if (SHIP_POSITION_SERVICE != null) {
+                SHIP_POSITION_SERVICE.setServer(server);
+            }
             GROUP_TASK_SERVICE.setServer(server);
             ROSTER_SERVICE.setServer(server);
 
@@ -735,6 +766,20 @@ public class SecondDawnRP implements ModInitializer {
                 try { DATABASE_MANAGER.close(); }
                 catch (Exception e) { throw new RuntimeException("Failed to close database manager", e); }
             }
+            ServerTickEvents.END_SERVER_TICK.register(srv -> {
+                if (server.getTicks() % 200 != 0) return;
+                for (var player : server.getPlayerManager().getPlayerList()) {
+                    net.shard.seconddawnrp.tactical.network.TacticalNetworking.sendStandbyUpdate(player);
+                }
+            });
+
+            ServerLifecycleEvents.SERVER_STOPPING.register(srv -> {
+                if (PASSIVE_SHIP_MOVEMENT_SERVICE != null) {
+                    PASSIVE_SHIP_MOVEMENT_SERVICE.savePosition();
+                }
+            });
+
+
         });
     }
 

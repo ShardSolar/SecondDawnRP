@@ -177,6 +177,11 @@ public class EncounterService {
         return "Ship '" + registryName + "' [" + shipId + "] registered as " + shipClass + ".";
     }
 
+    /** Persist a ship registry entry — used when flags like isHomeShip change at runtime. */
+    public void saveShipRegistryEntry(ShipRegistryEntry entry) {
+        repository.saveShipRegistryEntry(entry);
+    }
+
     public String unregisterShip(String shipId) {
         if (shipRegistry.remove(shipId) == null) return "Ship not found.";
         hardpoints.remove(shipId);

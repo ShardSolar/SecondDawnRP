@@ -1,5 +1,7 @@
 package net.shard.seconddawnrp.dimension;
 
+import org.jetbrains.annotations.Nullable;
+
 /**
  * Immutable data loaded from data/seconddawnrp/dimensions/[id].json
  *
@@ -12,12 +14,21 @@ package net.shard.seconddawnrp.dimension;
  *   "defaultEntryY": 64.0,
  *   "defaultEntryZ": 0.5,
  *   "taskPoolIsolated": true,
- *   "proximityRequired": false
+ *   "proximityRequired": true,
+ *   "orbitalZone": {
+ *     "centerX": 500,
+ *     "centerZ": -200,
+ *     "radius": 50,
+ *     "minimumWarpSpeed": 2
+ *   }
  * }
  *
- * proximityRequired: Phase 12 hook. When true, the tactical map proximity
- * check must pass before this dimension is reachable. Currently ignored —
- * LocationService.proximityCheck() always returns true until Phase 12.
+ * orbitalZone is optional — dimensions without it are always accessible
+ * regardless of ship position (e.g. Space dimension, local installations).
+ *
+ * proximityRequired: when true, LocationService.isReachable() enforces the
+ * orbitalZone check. When false (or when orbitalZone is null), the dimension
+ * is reachable whenever GM-activated.
  */
 public record LocationDefinition(
         String dimensionId,
@@ -27,10 +38,16 @@ public record LocationDefinition(
         double defaultEntryY,
         double defaultEntryZ,
         boolean taskPoolIsolated,
-        boolean proximityRequired
+        boolean proximityRequired,
+        @Nullable OrbitalZone orbitalZone
 ) {
     /** The Minecraft dimension key, e.g. "seconddawnrp:colony_alpha" */
     public String dimensionKey() {
         return "seconddawnrp:" + dimensionId;
+    }
+
+    /** True if this dimension has an orbital zone AND proximity is required. */
+    public boolean hasOrbitalZone() {
+        return orbitalZone != null && proximityRequired;
     }
 }

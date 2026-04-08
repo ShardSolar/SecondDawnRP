@@ -30,6 +30,10 @@ public class ShipRegistryEntry {
     private double defaultPosZ;
     private float  defaultHeading;
 
+    // Home ship flag — exactly one ship per server has this set.
+    // Its ShipState is always loaded and position is persisted to ship_position table.
+    private boolean isHomeShip = false;
+
     public ShipRegistryEntry(String shipId, String registryName, String shipClass,
                              String faction) {
         this.shipId       = shipId;
@@ -77,4 +81,7 @@ public class ShipRegistryEntry {
         this.defaultPosZ    = z;
         this.defaultHeading = heading;
     }
+
+    public boolean isHomeShip()          { return isHomeShip; }
+    public void setHomeShip(boolean h)   { this.isHomeShip = h; }
 }

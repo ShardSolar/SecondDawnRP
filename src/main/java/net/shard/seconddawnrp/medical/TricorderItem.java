@@ -70,7 +70,7 @@ public class TricorderItem extends Item {
 
         // ── Header ─────────────────────────────────────────────
         scanner.sendMessage(Text.literal(
-                        "─── Tricorder Scan ─────────────────")
+                        "────────── Tricorder Scan ──────────")
                 .formatted(Formatting.DARK_AQUA), false);
 
         scanner.sendMessage(Text.literal(
@@ -182,7 +182,7 @@ public class TricorderItem extends Item {
 
         // ── Footer ─────────────────────────────────────────────
         scanner.sendMessage(Text.literal(
-                        "────────────────────────────────────")
+                        "───────────────────────────────")
                 .formatted(Formatting.DARK_AQUA), false);
     }
 

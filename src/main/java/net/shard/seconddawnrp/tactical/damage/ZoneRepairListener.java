@@ -8,15 +8,19 @@ import net.minecraft.util.ActionResult;
 import net.minecraft.util.Formatting;
 import net.minecraft.util.math.BlockPos;
 import net.shard.seconddawnrp.SecondDawnRP;
+import net.shard.seconddawnrp.tactical.data.DamageZone;
 import net.shard.seconddawnrp.tactical.data.ShipState;
 import net.shard.seconddawnrp.tactical.service.EncounterService;
+import net.shard.seconddawnrp.tactical.service.HullDamageService;
+
+import java.util.Map;
+import java.util.Optional;
 
 /**
- * Listens for player right-click interactions on damaged zone blocks.
- * When an Engineering player interacts with a block that is part of a damaged zone,
- * they can initiate repair using materials from their inventory.
- *
- * Required item for repair: configured per ship class (MVP: any planks/stone brick).
+ * Listens for Engineering player right-clicks on damaged zone blocks.
+ * Requires 4 Stone Bricks in hand (MVP repair material).
+ * Calls HullDamageService.repairZone() with the correct ServerWorld so
+ * DamageModelMapper can restore physical blocks.
  */
 public class ZoneRepairListener {
 
@@ -24,25 +28,25 @@ public class ZoneRepairListener {
         UseBlockCallback.EVENT.register((player, world, hand, hitResult) -> {
             if (world.isClient()) return ActionResult.PASS;
             if (!(player instanceof ServerPlayerEntity sp)) return ActionResult.PASS;
+            if (SecondDawnRP.TACTICAL_SERVICE == null) return ActionResult.PASS;
 
             BlockPos pos = hitResult.getBlockPos();
+            HullDamageService hullDamageService =
+                    SecondDawnRP.TACTICAL_SERVICE.getHullDamageService();
+            EncounterService encounterService =
+                    SecondDawnRP.TACTICAL_SERVICE.getEncounterService();
 
-            // Find if this block is part of a damaged zone on any active ship
-            if (SecondDawnRP.TACTICAL_SERVICE == null) return ActionResult.PASS;
-            EncounterService es = SecondDawnRP.TACTICAL_SERVICE.getEncounterService();
-
-            for (var encounter : es.getAllEncounters()) {
+            for (var encounter : encounterService.getAllEncounters()) {
                 for (ShipState ship : encounter.getAllShips()) {
-                    String zoneId = findZoneForBlock(ship.getShipId(), pos);
+                    // Find if this block belongs to a damaged zone on this ship
+                    String zoneId = findZoneForBlock(
+                            hullDamageService.getZonesForShip(ship.getShipId()), pos);
                     if (zoneId == null) continue;
 
-                    // Check if zone is actually damaged
-                    if (!SecondDawnRP.TACTICAL_SERVICE
-                            .getHullDamageService().isZoneDamaged(ship.getShipId(), zoneId)) {
-                        continue;
-                    }
+                    // Only act if zone is actually damaged
+                    if (!hullDamageService.isZoneDamaged(ship.getShipId(), zoneId)) continue;
 
-                    // Engineering division check (or GM bypass)
+                    // Engineering division check (GMs bypass)
                     if (!sp.hasPermissionLevel(2) && !isEngineering(sp)) {
                         sp.sendMessage(Text.literal(
                                         "[Tactical] Engineering division required to repair zones.")
@@ -50,28 +54,23 @@ public class ZoneRepairListener {
                         return ActionResult.FAIL;
                     }
 
-                    // Check repair materials (MVP: requires 4 stone bricks in hand)
+                    // Repair material check — 4 stone bricks
                     var stack = sp.getMainHandStack();
                     if (stack.getItem() != net.minecraft.item.Items.STONE_BRICKS
                             || stack.getCount() < 4) {
                         sp.sendMessage(Text.literal(
                                         "[Tactical] Repair requires 4 Stone Bricks. Zone: " + zoneId)
                                 .formatted(Formatting.YELLOW), false);
-                        return ActionResult.SUCCESS; // consume click, don't interact
+                        return ActionResult.SUCCESS; // consume click
                     }
 
-                    // Consume materials and repair
                     stack.decrement(4);
 
-                    // Restore physical blocks
-                    DamageModelMapper.restoreZone(ship.getShipId(), zoneId, (ServerWorld) world);
+                    // Pass the ServerWorld so DamageModelMapper can restore blocks
+                    hullDamageService.repairZone(ship, zoneId, (ServerWorld) world);
 
-                    // Clear zone damage state
-                    SecondDawnRP.TACTICAL_SERVICE
-                            .getHullDamageService().repairZone(ship, zoneId);
-
-                    encounter.log("[REPAIR] Zone " + zoneId + " repaired by "
-                            + sp.getName().getString());
+                    encounter.log("[REPAIR] Zone " + zoneId
+                            + " repaired by " + sp.getName().getString());
 
                     sp.sendMessage(Text.literal(
                                     "[Tactical] Zone " + zoneId + " repaired successfully.")
@@ -85,11 +84,15 @@ public class ZoneRepairListener {
         });
     }
 
-    private static String findZoneForBlock(String shipId, BlockPos pos) {
+    /**
+     * Searches all zones on a ship for a real ship block matching the clicked position.
+     * Returns the zoneId if found, null otherwise.
+     */
+    private static String findZoneForBlock(Map<String, DamageZone> zones, BlockPos pos) {
         long encoded = pos.asLong();
-        for (String zoneId : DamageModelMapper.getZonesForShip(shipId)) {
-            for (BlockPos rp : DamageModelMapper.getRealBlocks(shipId, zoneId)) {
-                if (rp.asLong() == encoded) return zoneId;
+        for (var entry : zones.entrySet()) {
+            for (BlockPos rp : entry.getValue().getRealShipBlocks()) {
+                if (rp.asLong() == encoded) return entry.getKey();
             }
         }
         return null;
@@ -98,7 +101,6 @@ public class ZoneRepairListener {
     private static boolean isEngineering(ServerPlayerEntity player) {
         var profile = SecondDawnRP.PROFILE_MANAGER.getLoadedProfile(player.getUuid());
         if (profile == null || profile.getDivision() == null) return false;
-        String div = profile.getDivision().name();
-        return div.equals("OPERATIONS") || div.equals("ENGINEERING");
+        return profile.getDivision().name().equals("ENGINEERING");
     }
 }

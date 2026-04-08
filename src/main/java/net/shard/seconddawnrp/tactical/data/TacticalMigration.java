@@ -110,4 +110,32 @@ public class TacticalMigration {
 
         System.out.println("[SecondDawnRP] Database V13 applied: Tactical tables created.");
     }
+
+    /**
+     * V14 — Persistent ship position for home ship passive movement.
+     * One row per home ship — stores posX/Z, heading, speed, warpSpeed between restarts.
+     */
+    public static void applyVersion14(Connection c) throws SQLException {
+        try (Statement s = c.createStatement()) {
+            s.execute("CREATE TABLE IF NOT EXISTS ship_position (" +
+                    "ship_id       TEXT PRIMARY KEY, " +
+                    "pos_x         REAL NOT NULL DEFAULT 0.0, " +
+                    "pos_z         REAL NOT NULL DEFAULT 0.0, " +
+                    "heading       REAL NOT NULL DEFAULT 0.0, " +
+                    "speed         REAL NOT NULL DEFAULT 0.0, " +
+                    "warp_speed    INTEGER NOT NULL DEFAULT 0, " +
+                    "warp_capable  INTEGER NOT NULL DEFAULT 0, " +
+                    "target_heading REAL NOT NULL DEFAULT 0.0, " +
+                    "target_speed   REAL NOT NULL DEFAULT 0.0, " +
+                    "last_updated  INTEGER NOT NULL DEFAULT 0" +
+                    ")");
+            // Add is_home_ship to ship_registry if not already present
+            try {
+                s.execute("ALTER TABLE ship_registry ADD COLUMN is_home_ship INTEGER NOT NULL DEFAULT 0");
+            } catch (java.sql.SQLException ignored) {
+                // Column already exists — safe to ignore
+            }
+        }
+        System.out.println("[SecondDawnRP] Database V14 applied: ship_position table created.");
+    }
 }

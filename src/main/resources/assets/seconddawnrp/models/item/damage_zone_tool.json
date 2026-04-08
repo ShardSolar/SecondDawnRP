@@ -1,0 +1,6 @@
+{
+  "parent": "minecraft:item/handheld",
+  "textures": {
+    "layer0": "seconddawnrp:item/damage_zone_tool"
+  }
+}

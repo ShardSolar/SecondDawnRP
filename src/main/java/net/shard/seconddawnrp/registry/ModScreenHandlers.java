@@ -82,7 +82,8 @@ public class ModScreenHandlers {
             SecondDawnRP.id("tactical_console"),
             new ScreenHandlerType<>(
                     (syncId, inv) -> new net.shard.seconddawnrp.tactical.console.TacticalScreenHandler(syncId, inv),
-                    FeatureFlags.VANILLA_FEATURES));
+                    FeatureFlags.VANILLA_FEATURES)
+    );
     public static void register() {
         // no-op
     }

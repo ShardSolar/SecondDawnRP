@@ -46,6 +46,7 @@ public class ShipState {
     private int powerOutput;     // read from WarpCoreService each tick
     private int powerBudget;     // after warp state penalties
     private boolean manualPowerAllocation;
+    private boolean manualPowerOverride; // GM override — skips warp core read
     private int weaponsPower;
     private int shieldsPower;
     private int enginesPower;
@@ -193,6 +194,7 @@ public class ShipState {
     public int    getPowerOutput()     { return powerOutput; }
     public int    getPowerBudget()     { return powerBudget; }
     public boolean isManualPower()     { return manualPowerAllocation; }
+    public boolean isManualPowerOverride() { return manualPowerOverride; }
     public int    getWeaponsPower()    { return weaponsPower; }
     public int    getShieldsPower()    { return shieldsPower; }
     public int    getEnginesPower()    { return enginesPower; }
@@ -215,6 +217,7 @@ public class ShipState {
     public void setPowerOutput(int p)              { this.powerOutput = p; }
     public void setPowerBudget(int p)              { this.powerBudget = p; }
     public void setManualPower(boolean b)          { this.manualPowerAllocation = b; }
+    public void setManualPowerOverride(boolean b)  { this.manualPowerOverride = b; }
     public void setWeaponsPower(int p)             { this.weaponsPower = p; }
     public void setShieldsPower(int p)             { this.shieldsPower = p; }
     public void setEnginesPower(int p)             { this.enginesPower = p; }

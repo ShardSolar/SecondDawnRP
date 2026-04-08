@@ -88,23 +88,55 @@ public class LocationService {
 
     /**
      * Returns true if this dimension can currently be reached via transporter.
-     * Phase 12: add && TACTICAL_SERVICE.isInRange(dimensionId) when available.
+     * Uses the home ship's current position from ShipPositionService if available.
      */
     public boolean isReachable(String dimensionId) {
         if (!isActive(dimensionId)) return false;
         Optional<LocationDefinition> def = registry.get(dimensionId);
         if (def.isEmpty()) return false;
-        return proximityCheck(dimensionId, def.get());
+
+        if (!def.get().hasOrbitalZone()) return true; // no proximity requirement
+
+        // Get home ship position from ShipPositionService
+        if (net.shard.seconddawnrp.SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null) return true;
+        net.shard.seconddawnrp.tactical.data.ShipState homeShip =
+                net.shard.seconddawnrp.SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
+        if (homeShip == null) return true; // no home ship registered — don't block
+
+        return proximityCheck(def.get(), homeShip.getPosX(), homeShip.getPosZ(),
+                homeShip.getWarpSpeed()) == ProximityResult.REACHABLE;
     }
 
     /**
-     * Phase 12 hook — always returns true until Tactical map is built.
-     * When Phase 12 ships: check def.proximityRequired() and query tactical service.
+     * Full proximity check with explicit position — used by passive tick and
+     * TransporterService to evaluate reachability at a specific ship position.
+     *
+     * Returns REACHABLE, IN_RANGE_INSUFFICIENT_WARP, or OUT_OF_RANGE.
      */
-    @SuppressWarnings("unused")
-    private boolean proximityCheck(String dimensionId, LocationDefinition def) {
-        // TODO Phase 12: if (def.proximityRequired()) return TACTICAL_SERVICE.isInRange(dimensionId);
-        return true;
+    public ProximityResult isReachable(String dimensionId, double posX, double posZ,
+                                       int warpSpeed) {
+        if (!isActive(dimensionId)) return ProximityResult.OUT_OF_RANGE;
+        Optional<LocationDefinition> def = registry.get(dimensionId);
+        if (def.isEmpty()) return ProximityResult.OUT_OF_RANGE;
+        if (!def.get().hasOrbitalZone()) return ProximityResult.REACHABLE;
+        return proximityCheck(def.get(), posX, posZ, warpSpeed);
+    }
+
+    private ProximityResult proximityCheck(LocationDefinition def,
+                                           double posX, double posZ, int warpSpeed) {
+        OrbitalZone zone = def.orbitalZone();
+        if (zone == null) return ProximityResult.REACHABLE;
+
+        if (!zone.inRange(posX, posZ)) return ProximityResult.OUT_OF_RANGE;
+        if (warpSpeed < zone.minimumWarpSpeed()) return ProximityResult.IN_RANGE_INSUFFICIENT_WARP;
+        return ProximityResult.REACHABLE;
+    }
+
+    /** Proximity result states used by transporter, helm UI, and supply terminal. */
+    public enum ProximityResult {
+        REACHABLE,
+        IN_RANGE_INSUFFICIENT_WARP,
+        OUT_OF_RANGE
     }
 
     // ── Entry point overrides ─────────────────────────────────────────────────

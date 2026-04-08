@@ -25,8 +25,9 @@ public class TacticalRepository {
             try (PreparedStatement ps = conn.prepareStatement(
                     "INSERT INTO ship_registry (ship_id, registry_name, ship_class, faction, " +
                             "model_world_key, model_origin_long, real_ship_world_key, real_ship_origin_long, " +
-                            "default_spawn_long, default_spawn_world_key, default_pos_x, default_pos_z, default_heading) " +
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?) " +
+                            "default_spawn_long, default_spawn_world_key, default_pos_x, default_pos_z, " +
+                            "default_heading, is_home_ship) " +
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
                             "ON CONFLICT(ship_id) DO UPDATE SET " +
                             "registry_name=excluded.registry_name, ship_class=excluded.ship_class, " +
                             "faction=excluded.faction, model_world_key=excluded.model_world_key, " +
@@ -37,7 +38,8 @@ public class TacticalRepository {
                             "default_spawn_world_key=excluded.default_spawn_world_key, " +
                             "default_pos_x=excluded.default_pos_x, " +
                             "default_pos_z=excluded.default_pos_z, " +
-                            "default_heading=excluded.default_heading")) {
+                            "default_heading=excluded.default_heading, " +
+                            "is_home_ship=excluded.is_home_ship")) {
                 ps.setString(1, entry.getShipId());
                 ps.setString(2, entry.getRegistryName());
                 ps.setString(3, entry.getShipClass());
@@ -51,6 +53,7 @@ public class TacticalRepository {
                 ps.setDouble(11, entry.getDefaultPosX());
                 ps.setDouble(12, entry.getDefaultPosZ());
                 ps.setFloat(13, entry.getDefaultHeading());
+                ps.setInt(14, entry.isHomeShip() ? 1 : 0);
                 ps.executeUpdate();
             }
         } catch (SQLException e) {
@@ -71,12 +74,24 @@ public class TacticalRepository {
                             rs.getString("ship_class"),
                             rs.getString("faction"));
                     String mwk = rs.getString("model_world_key");
-                    if (mwk != null) { e.setModelWorldKey(mwk); e.setModelOrigin(BlockPos.fromLong(rs.getLong("model_origin_long"))); }
+                    if (mwk != null) {
+                        e.setModelWorldKey(mwk);
+                        e.setModelOrigin(BlockPos.fromLong(rs.getLong("model_origin_long")));
+                    }
                     String rwk = rs.getString("real_ship_world_key");
-                    if (rwk != null) { e.setRealShipWorldKey(rwk); e.setRealShipOrigin(BlockPos.fromLong(rs.getLong("real_ship_origin_long"))); }
+                    if (rwk != null) {
+                        e.setRealShipWorldKey(rwk);
+                        e.setRealShipOrigin(BlockPos.fromLong(rs.getLong("real_ship_origin_long")));
+                    }
                     String swk = rs.getString("default_spawn_world_key");
-                    if (swk != null) e.setDefaultSpawn(BlockPos.fromLong(rs.getLong("default_spawn_long")), swk);
-                    e.setDefaultPosition(rs.getDouble("default_pos_x"), rs.getDouble("default_pos_z"), rs.getFloat("default_heading"));
+                    if (swk != null)
+                        e.setDefaultSpawn(BlockPos.fromLong(rs.getLong("default_spawn_long")), swk);
+                    e.setDefaultPosition(
+                            rs.getDouble("default_pos_x"),
+                            rs.getDouble("default_pos_z"),
+                            rs.getFloat("default_heading"));
+                    try { e.setHomeShip(rs.getInt("is_home_ship") == 1); }
+                    catch (SQLException ignored) {}
                     result.add(e);
                 }
             }
@@ -164,6 +179,155 @@ public class TacticalRepository {
             System.err.println("[Tactical] Failed to delete hardpoint: " + e.getMessage());
             return false;
         }
+    }
+
+    // ── Zone block registrations ──────────────────────────────────────────────
+
+    /**
+     * Load all zone block registrations for all ships.
+     * Returns: Map<shipId, Map<zoneId, Map<"MODEL"|"REAL", List<Long>>>>
+     */
+    public Map<String, Map<String, Map<String, List<Long>>>> loadAllZoneBlocks() {
+        Map<String, Map<String, Map<String, List<Long>>>> result = new HashMap<>();
+
+        try {
+            Connection conn = db.getConnection();
+
+            // Load model blocks
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT ship_id, zone_id, block_pos_long FROM damage_zone_model_blocks");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result
+                            .computeIfAbsent(rs.getString("ship_id"), k -> new HashMap<>())
+                            .computeIfAbsent(rs.getString("zone_id"), k -> new HashMap<>())
+                            .computeIfAbsent("MODEL", k -> new ArrayList<>())
+                            .add(rs.getLong("block_pos_long"));
+                }
+            }
+
+            // Load real blocks
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT ship_id, zone_id, block_pos_long FROM damage_zone_real_blocks");
+                 ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    result
+                            .computeIfAbsent(rs.getString("ship_id"), k -> new HashMap<>())
+                            .computeIfAbsent(rs.getString("zone_id"), k -> new HashMap<>())
+                            .computeIfAbsent("REAL", k -> new ArrayList<>())
+                            .add(rs.getLong("block_pos_long"));
+                }
+            }
+
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to load zone blocks: " + e.getMessage());
+        }
+
+        return result;
+    }
+
+    /** Insert a model block registration. Ignores duplicate. */
+    public void saveZoneModelBlock(String shipId, String zoneId, long blockPosLong) {
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT OR IGNORE INTO damage_zone_model_blocks " +
+                            "(zone_id, ship_id, block_pos_long) VALUES (?,?,?)")) {
+                ps.setString(1, zoneId);
+                ps.setString(2, shipId);
+                ps.setLong(3, blockPosLong);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to save zone model block: " + e.getMessage());
+        }
+    }
+
+    /** Insert a real block registration. Ignores duplicate. */
+    public void saveZoneRealBlock(String shipId, String zoneId, long blockPosLong) {
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT OR IGNORE INTO damage_zone_real_blocks " +
+                            "(zone_id, ship_id, block_pos_long) VALUES (?,?,?)")) {
+                ps.setString(1, zoneId);
+                ps.setString(2, shipId);
+                ps.setLong(3, blockPosLong);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to save zone real block: " + e.getMessage());
+        }
+    }
+
+    /** Delete a single model block registration. */
+    public void deleteZoneModelBlock(String shipId, String zoneId, long blockPosLong) {
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM damage_zone_model_blocks " +
+                            "WHERE ship_id=? AND zone_id=? AND block_pos_long=?")) {
+                ps.setString(1, shipId);
+                ps.setString(2, zoneId);
+                ps.setLong(3, blockPosLong);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to delete zone model block: " + e.getMessage());
+        }
+    }
+
+    /** Delete a single real block registration. */
+    public void deleteZoneRealBlock(String shipId, String zoneId, long blockPosLong) {
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM damage_zone_real_blocks " +
+                            "WHERE ship_id=? AND zone_id=? AND block_pos_long=?")) {
+                ps.setString(1, shipId);
+                ps.setString(2, zoneId);
+                ps.setLong(3, blockPosLong);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to delete zone real block: " + e.getMessage());
+        }
+    }
+
+    /** Delete all model blocks for a zone. */
+    public void deleteAllZoneModelBlocks(String shipId, String zoneId) {
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM damage_zone_model_blocks WHERE ship_id=? AND zone_id=?")) {
+                ps.setString(1, shipId);
+                ps.setString(2, zoneId);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to delete zone model blocks: " + e.getMessage());
+        }
+    }
+
+    /** Delete all real blocks for a zone. */
+    public void deleteAllZoneRealBlocks(String shipId, String zoneId) {
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM damage_zone_real_blocks WHERE ship_id=? AND zone_id=?")) {
+                ps.setString(1, shipId);
+                ps.setString(2, zoneId);
+                ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to delete zone real blocks: " + e.getMessage());
+        }
+    }
+
+    /** Delete all block registrations for a ship (used when removing a zone entirely). */
+    public void deleteAllZoneBlocksForShipZone(String shipId, String zoneId) {
+        deleteAllZoneModelBlocks(shipId, zoneId);
+        deleteAllZoneRealBlocks(shipId, zoneId);
     }
 
     // ── Shipyard ──────────────────────────────────────────────────────────────

@@ -127,11 +127,16 @@ public class ModItems {
     public static final Item GURNEY = register("gurney",
             new GurneyItem(new Item.Settings().maxCount(1)));
 
-    public static final BlockItem TACTICAL_CONSOLE =
+    public static final net.shard.seconddawnrp.tactical.damage.DamageZoneToolItem DAMAGE_ZONE_TOOL =
             Registry.register(Registries.ITEM,
-                    SecondDawnRP.id("tactical_console"),
-                    new BlockItem(ModBlocks.TACTICAL_CONSOLE, new Item.Settings()));
+                    SecondDawnRP.id("damage_zone_tool"),
+                    new net.shard.seconddawnrp.tactical.damage.DamageZoneToolItem(
+                            new Item.Settings().maxCount(1)));
 
+    public static final Item TACTICAL_CONSOLE = Registry.register(
+            Registries.ITEM,
+            SecondDawnRP.id("tactical_console"),
+            new BlockItem(ModBlocks.TACTICAL_CONSOLE, new Item.Settings()));
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private static Item register(String id, Item item) {

@@ -39,81 +39,148 @@ A Star Trek-themed roleplay server mod for Fabric 1.21.1. Built for the Second D
 - `/warpcore` commands — register, fuel, start, stop, status
 
 ### Phase 5.25 — Terminal Designator + ComputerCraft Integration
-- **Terminal Designator Tool** — designates any placed block in the world as a typed terminal. No custom blocks needed — build teams choose the aesthetic, the mod provides the function
-- **Terminal types:** OPS_TERMINAL, ENGINEERING_CONSOLE, ROSTER_CONSOLE (active) + MEDICAL, SECURITY, SCIENCE, TACTICAL, MISSION, RESOURCE, LIBRARY (stubbed, activate as phases complete)
-- **Colored block outlines** — server-side DustParticleEffect wireframe rendered around designated terminals when the tool is held. Color-coded per type
-- **Action bar prompt** — looking at any designated terminal shows its name and "Right-click to open" above the XP bar for all players
+- **Terminal Designator Tool** — designates any placed block in the world as a typed terminal
+- **Terminal types:** OPS_TERMINAL, ENGINEERING_CONSOLE, ROSTER_CONSOLE (active) + MEDICAL, SECURITY, SCIENCE, TACTICAL, MISSION, RESOURCE, LIBRARY (stubbed)
+- **Colored block outlines** — server-side DustParticleEffect wireframe per type
+- **Action bar prompt** — name + "Right-click to open" shown above XP bar for all players
 - **Persistent JSON registry** — `config/assets/seconddawnrp/terminal_designations.json`
-- **ComputerCraft integration** — optional, zero impact if CC absent. `WarpCorePeripheral`, `DegradationPeripheral`, `OpsPeripheral` expose live ship data to Lua programs via `@LuaFunction` annotations
-- **DB migration:** V7 (mustang, ship_position columns, officer_slot_queue table)
+- **ComputerCraft integration** — optional, zero impact if CC absent. `WarpCorePeripheral`, `DegradationPeripheral`, `OpsPeripheral` via `@LuaFunction`
 
 ### Phase 5.5 — Character System
-- **CharacterProfile merged into PlayerProfile** — one class, one repository, one save call
+- **CharacterProfile merged into PlayerProfile**
 - Character fields: `characterName`, `species`, `bio`, `characterStatus`, `knownLanguages`, `universalTranslator`, `permadeathConsent`, `activeLongTermInjuryId`, `deceasedAt`, `progressionTransfer`, `serviceRecord`
-- **SpeciesRegistry** — JSON-driven at `data/seconddawnrp/species/`, ships with `human.json`, GM-extensible
-- **CharacterCreationTerminalBlock** — physical block, 3-tab code-drawn GUI (Identity → Bio → Confirm)
-- Species locked after creation — GM override only via `/gm character set species`
-- Starting languages seeded from species definition on creation
-- **LongTermInjuryService** — three tiers (MINOR/MODERATE/SEVERE), tick refresh every 5 minutes, 24hr treatment cooldown, Medical treatment API
+- **SpeciesRegistry** — JSON-driven at `data/seconddawnrp/species/`, ships with `human.json`
+- **CharacterCreationTerminalBlock** — physical block, 3-tab GUI (Identity → Bio → Confirm)
+- **LongTermInjuryService** — three tiers (MINOR/MODERATE/SEVERE), tick refresh, treatment cooldown, Medical treatment API
 - **RdmDetectionService** — automatic RDM flag generation, GM notification
-- **CharacterArchiveRepository** — write-only death snapshots, historical record preserved permanently
-- `/profile` — unified command replacing all old character/profile commands
-- `/gm character kill` — two-step death with progression transfer percentage
-- `/gm character set` — name, bio, species, permadeath overrides
-- `/gm injury modify` — expiry adjustment in days
-- **DB migrations:** V4 (character_profiles, long_term_injuries, rdm_flags), V5 (character columns on players, player_known_languages, service_record)
+- **CharacterArchiveRepository** — write-only death snapshots
+- `/profile` unified command, `/gm character` override commands
 
 ### Phase 5.5 — Career Path Infrastructure
-- **Cadet track** — CADET_1 through CADET_4 ranks, division declaration gate at CADET_2, officer-approved promotion at each step
-- **Graduation flow** — two-step: instructor proposes starting rank → Captain approves. Session-only pending proposals
-- **Officer slot caps** — configurable per-rank maximums. Full ranks queue eligible players ordered by service record then time at rank
-- **Officer progression points** — automatic point awards for administrative actions (task approval, PADD review, cert confirmation). All values JSON-configurable
-- **Commendation system** — variable-point manual awards requiring written reason. Authority-gated to Commander+
-- **Ship positions** — FIRST_OFFICER and SECOND_OFFICER designations. Independent of rank. Grant shipwide certification confirmation authority
-- **Mustang flag** — permanent notation on PlayerProfile and Roster when a player crosses from enlisted to commissioned
-- **Group tasks** — tasks with participant capacity > 1, shared progress, distributed rewards
-- **Commands:** `/cadet enrol/promote/graduate/approve/status`, `/officer commend`, `/admin slots list/set/queue`, `/admin position set/clear`
-- **Config files:** `cadet_config.json`, `officer_slots.json`, `officer_progression.json`
+- Cadet track (CADET_1–4), division declaration gate, officer-approved promotion
+- Graduation flow — two-step: instructor proposes → Captain approves
+- Officer slot caps — configurable per-rank maximums with queue
+- Officer progression points — automatic point awards for admin actions
+- Commendation system — variable-point manual awards (Commander+)
+- Ship positions — FIRST_OFFICER and SECOND_OFFICER designations
+- Mustang flag — enlisted-to-commissioned notation
+- Group tasks — capacity > 1, shared progress, distributed rewards
 
 ### Phase 5.5 — Roster GUI
-- **Roster PAD item** — right-click to open the division roster screen. Any block can also be designated as a ROSTER_CONSOLE terminal (gold glow)
-- **Two-panel layout** — scrollable member list (left) + selected member detail panel (right)
-- **Member list** — online indicator dot, character name, rank abbreviation, division badge. Sorted online-first then by rank authority
-- **Detail panel** — character name, Minecraft username, rank, division, progression path, ship position, rank points, service record, certifications/billets, mustang flag
-- **Action buttons** — authority-gated, render only for viewers with sufficient rank:
-    - **Promote / Demote** — LT_COMMANDER+ (checks slot caps, queues if full)
-    - **Cadet Enrol / Promote / Propose Grad / Approve Grad** — officer level
-    - **Transfer / Dismiss** — LIEUTENANT+
-    - **Commend** — COMMANDER+
-- **Inline input overlay** — graduation rank entry and commend reason/points input directly in the screen, no commands needed
-- **Feedback bar** — action result shown at screen bottom for 4 seconds after any roster action
-- **Live refresh** — server pushes updated roster data after every action, screen re-renders without closing
-- Read-only view for all division members regardless of rank
+- **Roster PAD item** — right-click to open division roster screen
+- Two-panel layout — scrollable member list + selected member detail panel
+- Member list — online indicator, character name, rank, division badge, sorted online-first
+- Detail panel — full character data, rank points, service record, certs/billets, mustang flag
+- Authority-gated action buttons: Promote/Demote, Cadet actions, Transfer/Dismiss, Commend
+- Inline input overlay for graduation rank and commend reason
+- Live refresh — server pushes updated data after every action
 
 ### Phase 6 — Dice + RP PADD System
 
 #### Dice Engine
 - `/roll` — d20 with rank bonus, certification bonuses, demerit penalties
-- `/rp [action]` — third-person narration, bold gold formatting, broadcasts to all players, captured by active PADD sessions
-- `/gm rolls public/private` — toggle auto-broadcast vs hold-and-broadcast mode
-- `/gm roll broadcast [player]` / `broadcastall`
-- `/gm roll group [players...]` — group roll session, 60-second timeout
-- `/gm dc set [value]` / `clear` / per-player override
-- `/gm scenario create/call/list`
-- **RollModifierConfig** — JSON at `config/assets/seconddawnrp/roll_modifiers.json`
+- `/rp [action]` — third-person narration, broadcasts to all players
+- `/gm rolls public/private`, group rolls, DC system, scenario management
 
 #### RP PADD Item
-- Physical item — right-click opens code-drawn GUI with recording status, live log, Start/Stop, Sign
-- `/rp record start` (supports `radius:N` and `players:` options) / `stop`
+- Physical item — right-click opens GUI with recording status, live log, Start/Stop, Sign
 
 #### Submission Box Block
-- Accepts signed RP PADDs on right-click, saves to database, notifies online officers
+- Accepts signed RP PADDs, saves to database, notifies online officers
 
-#### Officer Review — Ops PADD PADS Tab
-- Fifth tab on the Ops PADD showing pending submissions
-- CONFIRM / DISPUTE with inline note input, generates Archive PADD item, awards officer progression points
-- 7-day auto-cleanup of resolved submissions
-- **DB migration:** V6 (rp_padd_submissions table)
+#### Officer Review
+- Fifth tab on Ops PADD showing pending submissions
+- CONFIRM / DISPUTE with inline note, generates Archive PADD, awards officer progression points
+
+### Phase 8 — Medical System
+- **MedicalConditionRegistry** — loads condition templates from JSON at `data/seconddawnrp/medical_conditions/`
+- `critical_trauma.json` baked in as string constant, written via `ensureSystemConditions()` on reload
+- **MedicalService** — treatment steps with timing windows (min/max seconds), failure consequences
+- **TricorderItem** — countdown display gated on `showTimer: true` in JSON; open to all players; `isMedicalOfficer` controls scan depth only; self-treatment blocked
+- **MedicalPadScreen** — GUI for Medical division players
+- **Downed state** — `DownedService` + `DownedHooks` with synchronous `ALLOW_DEATH` interception
+- **GurneyService** — transports downed players via invisible armor stands at Y-1.6 offset
+- **Force respawn** — hold Sneak for 3 seconds after 2-minute wait
+- **Low population mode** — triggers when fewer than 5 players online OR no Medical player online; grants Short-Term Injury (STI) instead of full LTI (MODERATE tier, 30-minute auto-expiry, 1 session to clear)
+- **LongTermInjury** extended with `sessionsRequired` field (default -1 = use tier default)
+
+### Phase 9 — Transporter System
+- **TransporterService** — manages pad registrations, controller block state, destination queue
+- Transporter pads are decorative only; the controller block is the sole functional element
+- `/transporter ready` opt-in for targeting
+- Destinations: named ship locations, GM-activated colony dimensions, player-follow, custom XYZ
+- Access requires Operations division + Transporter Operator certification
+- `/beamup` — colony players send pickup requests to the controller queue
+- Colony dimension reachability is GM-activated for MVP; `proximityCheck()` hook left for Phase 12
+
+### Phase 9 (partial) — Dimension / Location System
+- **LocationRegistry** — JSON-driven dimension definitions at `data/seconddawnrp/locations/`
+- **LocationService** — reachability calculation from ship position and warp speed
+- Orbital zone data pushed to tactical screens via `StellarNavUpdatePayload`
+
+### Phase 10 — Tactical System
+
+#### Encounter Engine
+- **EncounterService** — lifecycle: create, addship, start, pause, resume, end
+- **ShipState** — logical representation: position, heading, speed, hull, shields (4 facings), power subsystems, torpedoes, warp state
+- **ShipClassDefinition** — JSON-driven at `data/seconddawnrp/ships/` (ships `heavy_cruiser.json`, `light_destroyer.json`)
+- **TacticalService** — tick orchestrator (5s interval): Power → Penalties → Movement → Shields → Weapons → Fire → Warp → Hull check → Broadcast
+- **PowerService** — warp core output → power budget, auto/manual distribution, 30s manual timeout
+- **ShipMovementService** — heading/speed interpolation, position update, evasive maneuver
+- **ShieldService** — suppression ticking, power-scaled regen, facing distribution; regen halved if `zone.shield_emit` destroyed
+- **WeaponService** — phaser/torpedo resolution, hardpoint cooldowns, hit chance calculation; player-selectable target facing; bridge/aft zone penalty integration
+- **WarpService** — warp engagement/drop, power threshold checks
+- **HullDamageService** — hull threshold events (NOMINAL/DAMAGED/CRITICAL/FAILING/DESTROYED), shield vulnerability threshold (25%), zone damage routing
+
+#### Damage Zone System
+- **DamageZone** — per-zone HP (`hullMax / zoneCount`), model + real block lists, bounding box for player proximity (3-block padding all axes), lazy-cached
+- **DamageModelMapper** — pure executor: replaces real ship blocks with Air/Fire/Black Concrete/Gray Concrete on destroy; restores to stone bricks on repair
+- **DamageZoneToolItem** — right-click block registers; sneak + right-click removes; right-click air cycles MODEL/REAL mode; locator particles on register/remove
+- **ZoneRepairListener** — Engineering player right-clicks damaged block with 4 Stone Bricks to repair
+- Facing → zone mapping baked in:
+  - FORE → `zone.bridge`, `zone.weapons_fore`, `zone.torpedo_bay`, `zone.sensors`
+  - AFT → `zone.engines`, `zone.engineering`
+  - PORT/STARBOARD → `zone.shield_emit`, `zone.weapons_aft`, `zone.life_support`
+- Zone stat penalties applied every tick after power distribution:
+  - `zone.engines` — max speed capped at 50%
+  - `zone.weapons_fore` — weapons power reduced 30%
+  - `zone.torpedo_bay` — torpedo count forced to 0
+  - `zone.engineering` — power budget reduced 25%
+  - `zone.sensors` — sensor power forced to 0
+  - `zone.shield_emit` — regen rate halved (checked by ShieldService)
+  - `zone.bridge` — hit chance penalty -15% (checked by WeaponService)
+  - `zone.weapons_aft` — aft-arc hardpoints unavailable
+  - `zone.life_support` — status effects on players inside zone bounding box
+- Zone block registrations persisted to `damage_zone_model_blocks` / `damage_zone_real_blocks` tables, loaded at server start and merged into zone objects when ships join encounters
+
+#### Tactical Console GUI
+- **TacticalScreen** — four-panel code-drawn GUI: Navigation, Weapons, Shields, Status
+- Navigation panel — tactical map with encounter ships, shield rings, anomaly overlays; standby mode shows stellar nav map with orbital zones, ETA calculation, zoom (0.25×–4×), expand overlay
+- Weapons panel — target list, FORE/AFT/PORT/STBD facing selector (AUTO when none selected), fire/torpedo/evasive buttons
+- Shields panel — four facing bars with power-scaled display, balance button
+- Status panel — hull bar, power breakdown, scrollable encounter log (mouse wheel + ▲/▼ buttons)
+- **TacticalScreenHandler** — station filter (HELM/WEAPONS/SHIELDS/SENSORS/FULL), permission gating per station
+- **GmShipConsoleScreen** — GM-only screen: ship selector, direct helm/speed input, target selection, fire buttons, shield bars, log
+
+#### Networking
+- `EncounterUpdatePayload` S→C — full state delta every combat tick
+- `StandbyUpdatePayload` S→C — anomaly map pushed every 10s
+- `OpenTacticalPayload` S→C — screen open with full state
+- `StellarNavUpdatePayload` S→C — passive ship nav data (position, heading, speed, warp, orbital zones)
+- `LocateZoneBlockS2CPacket` S→C — locator particles for zone block registration
+- `WeaponFirePayload` C→S — includes `targetFacing` ("FORE"/"AFT"/"PORT"/"STARBOARD"/"AUTO")
+- `HelmInputPayload`, `PowerReroutePayload`, `ShieldDistributePayload` C→S
+
+#### Passive Ship Movement
+- **PassiveShipMovementService** — home ship position/heading/speed persisted to `ship_position` table, updated on passive tick (every 30s)
+- Stellar nav broadcast pushes home ship state to all open tactical screens
+
+#### GM Commands
+- `/gm encounter create|addship|start|pause|resume|end|list`
+- `/gm ship status|navstatus|zones|zonedamage|zonerepair|power|heading|speed|torpedoes|warp|position|homenavstatus`
+- `/admin ship register|unregister|list|sethomeship`
+- `/admin hardpoint register|list|zone set|zone clear|zone remove|zone locate`
+- `/admin shipyard set`
 
 ---
 
@@ -166,6 +233,17 @@ UI / Commands / Events
 | `SHIP_POSITION_SERVICE` | First/Second Officer designation |
 | `GROUP_TASK_SERVICE` | Group task sessions, shared progress, reward distribution |
 | `ROSTER_SERVICE` | Roster data building, all roster actions |
+| `MEDICAL_CONDITION_REGISTRY` | JSON condition templates (single shared instance) |
+| `MEDICAL_SERVICE` | Treatment steps, timing windows, failure consequences |
+| `MEDICAL_TERMINAL_SERVICE` | Medical terminal block state |
+| `DOWNED_SERVICE` | Downed state tracking, force respawn |
+| `GURNEY_SERVICE` | Armor stand transport for downed players |
+| `LOCATION_REGISTRY` | JSON dimension definitions |
+| `LOCATION_SERVICE` | Reachability calculation |
+| `TRANSPORTER_SERVICE` | Pad registrations, controller state, destination queue |
+| `ENCOUNTER_SERVICE` | Encounter lifecycle, ship registry, hardpoints |
+| `TACTICAL_SERVICE` | Encounter tick orchestrator, zone management |
+| `PASSIVE_SHIP_MOVEMENT_SERVICE` | Home ship passive nav, position persistence |
 
 ### Database Schema
 | Table | Purpose |
@@ -181,10 +259,19 @@ UI / Commands / Events
 | `components` | Degradation component registry |
 | `character_profiles` | Deceased character archive (write-only) |
 | `character_known_languages` | Languages at time of death (archive) |
-| `long_term_injuries` | Active and historical LTIs |
+| `long_term_injuries` | Active and historical LTIs (V10 adds `sessions_required`) |
 | `rdm_flags` | RDM detection flags |
 | `rp_padd_submissions` | RP PADD review queue (V6) |
 | `officer_slot_queue` | Players queued for promotion when rank is full (V7) |
+| `ship_registry` | Named vessel registry (V13) |
+| `hardpoint_registry` | Weapon mount registrations (V13) |
+| `damage_zone_registry` | Zone metadata per ship (V13) |
+| `damage_zone_model_blocks` | Model block positions per zone (V13) |
+| `damage_zone_real_blocks` | Real ship block positions per zone (V13) |
+| `encounter_state` | Active encounter persistence (V13) |
+| `encounter_ships` | Ships in active encounters (V13) |
+| `shipyard_config` | Shipyard spawn point (V13) |
+| `ship_position` | Home ship passive nav state (V14) |
 | `schema_version` | Migration tracking |
 
 ### Critical Notes
@@ -195,27 +282,33 @@ UI / Commands / Events
 5. **Payload registration** — must call `registerPayloads()` before `registerServerReceivers()` or crash on startup.
 6. **TREnergy** — push-based. Use `Transaction.openOuter()` + `target.insert()` each tick, always commit.
 7. **ProfileLtiCallback** — LongTermInjuryService uses this interface instead of CharacterRepository to update `activeLongTermInjuryId` on PlayerProfile.
-8. **Extended screens** — screens that carry data to the client must use `ExtendedScreenHandlerFactory` (not `SimpleNamedScreenHandlerFactory`) so `getScreenOpeningData()` fires the codec. See `RosterScreenHandlerFactory` / `TerminalScreenHandlerFactory`.
-9. **CC integration** — all CC classes isolated in `.cc` package. `CCPeripheralRegistry` checks `FabricLoader.isModLoaded("computercraft")` before touching any CC API. Mod loads and runs fully without CC.
-10. **Tick loop placement** — per-player calls like `tickActionBarPrompt` must be INSIDE the `for (var player : ...)` loop, not after the closing brace.
-11. **Java 21** — required by Minecraft 1.21.1 and CC:Tweaked 1.116+. Build target is `release = 21`.
+8. **Extended screens** — screens that carry data to the client must use `ExtendedScreenHandlerFactory`. See `RosterScreenHandlerFactory`.
+9. **CC integration** — all CC classes isolated in `.cc` package. `CCPeripheralRegistry` checks `FabricLoader.isModLoaded("computercraft")` before touching any CC API.
+10. **Tick loop placement** — per-player calls like `tickActionBarPrompt` must be INSIDE the `for (var player : ...)` loop.
+11. **Java 21** — required. Build target is `release = 21`.
+12. **MEDICAL_CONDITION_REGISTRY** — must be instantiated exactly once in `SecondDawnRP.java` before `LongTermInjuryService` construction. Never duplicated.
+13. **TacticalService constructor** — requires both `EncounterService` and `TacticalRepository`. `HullDamageService` gets the repository reference through `TacticalService`.
+14. **Zone block persistence** — `TACTICAL_SERVICE.loadFromDatabase()` must be called in `SERVER_STARTED` after `ENCOUNTER_SERVICE.loadFromDatabase()`. Block registrations are merged into `DamageZone` objects when ships join encounters.
+15. **Singleton discipline** — `zonesByShip` in `HullDamageService` is runtime-only (encounter-scoped). `damage_zone_model_blocks` / `damage_zone_real_blocks` are world-persistent. These are separate concerns.
 
 ---
 
 ## Config Files (auto-created on first boot)
-- `config/assets/seconddawnrp/roll_modifiers.json` — rank and cert bonuses for dice rolls
-- `config/assets/seconddawnrp/degradation_config.json` — component drain rates
-- `config/assets/seconddawnrp/warp_core_config.json` — warp core parameters
-- `config/assets/seconddawnrp/cadet_config.json` — cadet rank point thresholds and graduation rules
-- `config/assets/seconddawnrp/officer_slots.json` — slot caps per commissioned rank
-- `config/assets/seconddawnrp/officer_progression.json` — point values for officer admin actions
-- `config/assets/seconddawnrp/terminal_designations.json` — registered terminal block positions (delete on world wipe)
+- `config/assets/seconddawnrp/roll_modifiers.json`
+- `config/assets/seconddawnrp/degradation_config.json`
+- `config/assets/seconddawnrp/warp_core_config.json`
+- `config/assets/seconddawnrp/cadet_config.json`
+- `config/assets/seconddawnrp/officer_slots.json`
+- `config/assets/seconddawnrp/officer_progression.json`
+- `config/assets/seconddawnrp/terminal_designations.json` — delete on world wipe
 - `config/assets/seconddawnrp/cc_programs/` — example Lua programs for CC monitors
-- `data/seconddawnrp/species/*.json` — species definitions (ships with `human.json`)
+- `data/seconddawnrp/species/*.json` — ships with `human.json`
+- `data/seconddawnrp/ships/*.json` — ships with `heavy_cruiser.json`, `light_destroyer.json`
+- `data/seconddawnrp/medical_conditions/*.json` — `critical_trauma.json` auto-written
 
 ## Resource Files Required
-- `assets/seconddawnrp/textures/block/submission_box.png` (16×16)
-- `assets/seconddawnrp/textures/block/character_creation_terminal.png` (16×16)
+- `assets/seconddawnrp/textures/block/submission_box.png`
+- `assets/seconddawnrp/textures/block/character_creation_terminal.png`
 - `assets/seconddawnrp/blockstates/submission_box.json`
 - `assets/seconddawnrp/blockstates/character_creation_terminal.json`
 - `assets/seconddawnrp/models/block/submission_box.json`

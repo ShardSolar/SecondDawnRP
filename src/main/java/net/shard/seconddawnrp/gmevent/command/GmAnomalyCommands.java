@@ -10,6 +10,7 @@ import net.minecraft.util.Formatting;
 import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.gmevent.data.AnomalyEntry;
 import net.shard.seconddawnrp.gmevent.data.AnomalyType;
+import net.shard.seconddawnrp.tactical.network.TacticalNetworking;
 
 /**
  * GM commands for Anomaly Marker Blocks.
@@ -157,6 +158,10 @@ public final class GmAnomalyCommands {
             return 1;
         }
         SecondDawnRP.ANOMALY_SERVICE.activate(id, src.getServer());
+
+        // Push live update to all open tactical screens
+        TacticalNetworking.pushAnomalyUpdate(src.getServer(), opt.get().getWorldKey());
+
         src.sendFeedback(() ->
                 Text.literal("Anomaly contact activated: " + opt.get().getName())
                         .formatted(Formatting.GREEN), true);
@@ -167,6 +172,10 @@ public final class GmAnomalyCommands {
         var opt = SecondDawnRP.ANOMALY_SERVICE.getById(id);
         if (opt.isEmpty()) { src.sendError(Text.literal("Unknown anomaly id: " + id)); return 0; }
         SecondDawnRP.ANOMALY_SERVICE.deactivate(id);
+
+        // Push live update to all open tactical screens
+        TacticalNetworking.pushAnomalyUpdate(src.getServer(), opt.get().getWorldKey());
+
         src.sendFeedback(() ->
                 Text.literal("Anomaly contact deactivated: " + opt.get().getName())
                         .formatted(Formatting.YELLOW), true);

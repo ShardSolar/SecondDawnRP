@@ -73,10 +73,22 @@ public class LocationRegistry {
             boolean proxReq      = obj.has("proximityRequired")
                     && obj.get("proximityRequired").getAsBoolean();
 
+            // Optional orbital zone block — Phase 12 ship movement
+            OrbitalZone orbitalZone = null;
+            if (obj.has("orbitalZone") && !obj.get("orbitalZone").isJsonNull()) {
+                var oz = obj.getAsJsonObject("orbitalZone");
+                orbitalZone = new OrbitalZone(
+                        oz.has("centerX") ? oz.get("centerX").getAsDouble() : 0,
+                        oz.has("centerZ") ? oz.get("centerZ").getAsDouble() : 0,
+                        oz.has("radius")  ? oz.get("radius").getAsDouble()  : 100,
+                        oz.has("minimumWarpSpeed") ? oz.get("minimumWarpSpeed").getAsInt() : 0
+                );
+            }
+
             LocationDefinition def = new LocationDefinition(
                     dimensionId, displayName, description,
                     entryX, entryY, entryZ,
-                    taskIsolated, proxReq);
+                    taskIsolated, proxReq, orbitalZone);
 
             registry.put(dimensionId, def);
 

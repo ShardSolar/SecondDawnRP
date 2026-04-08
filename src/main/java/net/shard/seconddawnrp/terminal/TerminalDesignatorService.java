@@ -64,7 +64,6 @@ public class TerminalDesignatorService {
                     ), false);
                     return;
                 }
-
                 player.openHandledScreen(new SimpleNamedScreenHandlerFactory(
                         (syncId, inventory, p) -> new AdminTaskScreenHandler(syncId, inventory),
                         Text.literal("Operations PAD")
@@ -86,6 +85,36 @@ public class TerminalDesignatorService {
                 SecondDawnRP.MEDICAL_TERMINAL_SERVICE.handleTerminalInteract(player);
             }
 
+            // ── Phase 12 — Tactical stations ──────────────────────────────────
+
+            case TACTICAL_CONSOLE -> {
+                // Full console — GMs get the ship control screen, crew get full read view
+                openTacticalStation(player, "ALL");
+            }
+
+            case TACTICAL_HELM -> {
+                openTacticalStation(player, "HELM");
+            }
+
+            case TACTICAL_WEAPONS -> {
+                openTacticalStation(player, "WEAPONS");
+            }
+
+            case TACTICAL_SHIELDS -> {
+                openTacticalStation(player, "SHIELDS");
+            }
+
+            case SHIP_ORIGIN -> {
+                // No screen — just acknowledge. The block's position is
+                // already registered in the TerminalDesignatorRegistry.
+                player.sendMessage(Text.literal(
+                                "§b[Ship Origin] §fMarker confirmed at "
+                                        + "X:" + player.getBlockX()
+                                        + " Z:" + player.getBlockZ()
+                                        + " §7— Tactical map will center here in standby mode."),
+                        false);
+            }
+
             default -> player.sendMessage(
                     Text.literal("§7[Terminal] Screen routing not yet wired for: " + type.name()),
                     false
@@ -93,13 +122,57 @@ public class TerminalDesignatorService {
         }
     }
 
-    // ── Action bar prompt ─────────────────────────────────────────────────────
+    /**
+     * Opens the appropriate Tactical screen based on station type.
+     * GMs (permission level 2+) get the full GM ship console.
+     * Crew get the player TacticalScreen filtered to their station.
+     */
+    private void openTacticalStation(ServerPlayerEntity player, String stationFilter) {
+        if (SecondDawnRP.TACTICAL_SERVICE == null) {
+            player.sendMessage(Text.literal("§c[Tactical] System offline."), false);
+            return;
+        }
+
+        var encounters = SecondDawnRP.TACTICAL_SERVICE.getEncounterService().getAllEncounters();
+
+        // Find active encounter — or open standby screen
+        var encounter = encounters.stream()
+                .filter(e -> e.getStatus() ==
+                        net.shard.seconddawnrp.tactical.data.EncounterState.Status.ACTIVE
+                        || e.getStatus() ==
+                        net.shard.seconddawnrp.tactical.data.EncounterState.Status.PAUSED)
+                .findFirst()
+                .orElse(encounters.isEmpty() ? null : encounters.iterator().next());
+
+        boolean gmMode = player.hasPermissionLevel(2) && "ALL".equals(stationFilter);
+        net.shard.seconddawnrp.tactical.network.TacticalNetworking
+                .sendOpenPacket(player, encounter, stationFilter, gmMode);
+    }
+
+    // ── Ship origin lookup ────────────────────────────────────────────────────
 
     /**
-     * Called every 10 ticks per player from the SecondDawnRP tick loop.
-     * Uses a proper server-side raycast with RaycastContext so the block
-     * the player is looking at is accurate.
+     * Returns the nearest SHIP_ORIGIN designator to the given player.
+     * Used by TacticalScreen to center the standby map on the correct ship.
+     * Returns null if none registered within 512 blocks.
      */
+    public net.minecraft.util.math.BlockPos getShipOriginNear(
+            ServerPlayerEntity player, ServerWorld world) {
+        String worldKey = world.getRegistryKey().getValue().toString();
+        net.minecraft.util.math.BlockPos center = player.getBlockPos();
+
+        return SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY
+                .getNearby(worldKey, center, 512)
+                .stream()
+                .filter(e -> e.getType() == TerminalDesignatorType.SHIP_ORIGIN)
+                .min(java.util.Comparator.comparingDouble(
+                        e -> e.getPos().getSquaredDistance(center)))
+                .map(TerminalDesignatorEntry::getPos)
+                .orElse(null);
+    }
+
+    // ── Action bar prompt ─────────────────────────────────────────────────────
+
     public void tickActionBarPrompt(ServerPlayerEntity player) {
         if (!(player.getWorld() instanceof ServerWorld world)) return;
 
@@ -108,8 +181,7 @@ public class TerminalDesignatorService {
         var endPos = eyePos.add(lookVec.multiply(REACH));
 
         HitResult hit = world.raycast(new RaycastContext(
-                eyePos,
-                endPos,
+                eyePos, endPos,
                 RaycastContext.ShapeType.OUTLINE,
                 RaycastContext.FluidHandling.NONE,
                 player
@@ -161,8 +233,8 @@ public class TerminalDesignatorService {
     private void spawnBlockOutline(ServerWorld world, ServerPlayerEntity player,
                                    BlockPos pos, int rgb) {
         float r = ((rgb >> 16) & 0xFF) / 255f;
-        float g = ((rgb >> 8) & 0xFF) / 255f;
-        float b = (rgb & 0xFF) / 255f;
+        float g = ((rgb >> 8)  & 0xFF) / 255f;
+        float b = (rgb         & 0xFF) / 255f;
 
         double x0 = pos.getX() - 0.02, y0 = pos.getY() - 0.02, z0 = pos.getZ() - 0.02;
         double x1 = pos.getX() + 1.02, y1 = pos.getY() + 1.02, z1 = pos.getZ() + 1.02;

@@ -15,7 +15,9 @@
   "item.seconddawnrp.task_terminal_tool": "Task Terminal Tool",
   "item.seconddawnrp.terminal_designator_tool": "Terminal Designator Tool",
   "item.seconddawnrp.roster_pad": "Roster Pad",
-
+  "item.seconddawnrp.damage_zone_tool": "Damage Zone Tool",
+  "item.seconddawnrp.medical_pad": "Medical Pad",
+  "item.seconddawnrp.tricorder": "Tricorder",
 
 
 
@@ -32,5 +34,7 @@
   "block.seconddawnrp.power_relay":          "Power Relay",
   "block.seconddawnrp.fuel_tank":            "Fuel Tank",
   "block.seconddawnrp.submission_box":     "Submission Box",
-  "block.seconddawnrp.transporter_controller":    "Transporter Controller"
+  "block.seconddawnrp.transporter_controller":    "Transporter Controller",
+  "block.seconddawnrp.tactical_console_block":    "Tactical Console Block"
+
 }

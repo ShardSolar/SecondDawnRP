@@ -102,11 +102,7 @@ public final class ModBlocks {
                     SecondDawnRP.id("tactical_console"),
                     new net.shard.seconddawnrp.tactical.console.TacticalConsoleBlock());
 
-    public static final net.shard.seconddawnrp.tactical.damage.DamageZoneToolItem DAMAGE_ZONE_TOOL =
-            Registry.register(Registries.ITEM,
-                    SecondDawnRP.id("damage_zone_tool"),
-                    new net.shard.seconddawnrp.tactical.damage.DamageZoneToolItem(
-                            new Item.Settings().maxCount(1)));
+
 
     // ── Block entity types ────────────────────────────────────────────────────
 
