@@ -27,6 +27,10 @@ import java.util.Optional;
  *   1. Dispatch player right-click interactions to the correct existing screen.
  *   2. Render colored block-outline particles when the Terminal Designator Tool is held.
  *   3. Show an action bar prompt when a player is looking at a designated terminal.
+ *
+ * V15: openScreen() reads entry.getShipId() and passes it to the relevant
+ * screen open calls. Tactical stations use the bound ship's encounter.
+ * Engineering console sends only components registered to the bound ship.
  */
 public class TerminalDesignatorService {
 
@@ -51,11 +55,14 @@ public class TerminalDesignatorService {
             return true;
         }
 
-        openScreen(player, type);
+        openScreen(player, entry);
         return true;
     }
 
-    private void openScreen(ServerPlayerEntity player, TerminalDesignatorType type) {
+    private void openScreen(ServerPlayerEntity player, TerminalDesignatorEntry entry) {
+        TerminalDesignatorType type = entry.getType();
+        String shipId = entry.getShipId(); // may be null
+
         switch (type) {
             case OPS_TERMINAL -> {
                 if (!TaskPermissionUtil.canOpenOperationsPad(player)) {
@@ -71,9 +78,15 @@ public class TerminalDesignatorService {
             }
 
             case ENGINEERING_CONSOLE -> {
+                // V15: use player-position-scoped packet so the pad shows only
+                // components registered to the ship the player is standing on.
+                // If the terminal has an explicit ship binding, we could also use
+                // that directly — but position-based is more robust for multi-deck
+                // ships where the player is always physically inside the bounds.
                 ServerPlayNetworking.send(
                         player,
-                        OpenEngineeringPadS2CPacket.fromService(SecondDawnRP.DEGRADATION_SERVICE)
+                        OpenEngineeringPadS2CPacket.fromServiceForPlayer(
+                                SecondDawnRP.DEGRADATION_SERVICE, player)
                 );
             }
 
@@ -85,28 +98,25 @@ public class TerminalDesignatorService {
                 SecondDawnRP.MEDICAL_TERMINAL_SERVICE.handleTerminalInteract(player);
             }
 
-            // ── Phase 12 — Tactical stations ──────────────────────────────────
+            // ── Tactical stations ─────────────────────────────────────────────
 
             case TACTICAL_CONSOLE -> {
-                // Full console — GMs get the ship control screen, crew get full read view
-                openTacticalStation(player, "ALL");
+                openTacticalStation(player, "ALL", shipId);
             }
 
             case TACTICAL_HELM -> {
-                openTacticalStation(player, "HELM");
+                openTacticalStation(player, "HELM", shipId);
             }
 
             case TACTICAL_WEAPONS -> {
-                openTacticalStation(player, "WEAPONS");
+                openTacticalStation(player, "WEAPONS", shipId);
             }
 
             case TACTICAL_SHIELDS -> {
-                openTacticalStation(player, "SHIELDS");
+                openTacticalStation(player, "SHIELDS", shipId);
             }
 
             case SHIP_ORIGIN -> {
-                // No screen — just acknowledge. The block's position is
-                // already registered in the TerminalDesignatorRegistry.
                 player.sendMessage(Text.literal(
                                 "§b[Ship Origin] §fMarker confirmed at "
                                         + "X:" + player.getBlockX()
@@ -123,26 +133,75 @@ public class TerminalDesignatorService {
     }
 
     /**
-     * Opens the appropriate Tactical screen based on station type.
-     * GMs (permission level 2+) get the full GM ship console.
-     * Crew get the player TacticalScreen filtered to their station.
+     * Opens the appropriate Tactical screen based on station type and ship binding.
+     *
+     * Ship resolution order:
+     *   1. Use shipId from the terminal entry if set — this is the explicit binding.
+     *   2. Fall back to position-based resolution: find which registered ship contains
+     *      the player — useful for consoles registered before ship binding was added.
+     *   3. Fall back to first active encounter — last resort, works for single-ship setups.
+     *
+     * GMs (permission level 2+) opening TACTICAL_CONSOLE get the full GM ship console.
      */
-    private void openTacticalStation(ServerPlayerEntity player, String stationFilter) {
+    private void openTacticalStation(ServerPlayerEntity player, String stationFilter,
+                                     String boundShipId) {
         if (SecondDawnRP.TACTICAL_SERVICE == null) {
             player.sendMessage(Text.literal("§c[Tactical] System offline."), false);
             return;
         }
 
-        var encounters = SecondDawnRP.TACTICAL_SERVICE.getEncounterService().getAllEncounters();
+        var encounterService = SecondDawnRP.TACTICAL_SERVICE.getEncounterService();
+        var encounters = encounterService.getAllEncounters();
 
-        // Find active encounter — or open standby screen
-        var encounter = encounters.stream()
-                .filter(e -> e.getStatus() ==
-                        net.shard.seconddawnrp.tactical.data.EncounterState.Status.ACTIVE
-                        || e.getStatus() ==
-                        net.shard.seconddawnrp.tactical.data.EncounterState.Status.PAUSED)
-                .findFirst()
-                .orElse(encounters.isEmpty() ? null : encounters.iterator().next());
+        net.shard.seconddawnrp.tactical.data.EncounterState encounter = null;
+
+        // 1. Try explicit ship binding — find encounter containing that ship
+        if (boundShipId != null) {
+            encounter = encounters.stream()
+                    .filter(e -> e.getShip(boundShipId).isPresent())
+                    .findFirst()
+                    .orElse(null);
+
+            if (encounter == null) {
+                // Ship is registered but not in an active encounter — open standby
+                // scoped to that ship (TacticalNetworking handles null encounter as standby)
+                boolean gmMode = player.hasPermissionLevel(2) && "ALL".equals(stationFilter);
+                net.shard.seconddawnrp.tactical.network.TacticalNetworking
+                        .sendOpenPacket(player, null, stationFilter, gmMode);
+                return;
+            }
+        }
+
+        // 2. Position-based resolution — find ship whose bounds contain this player
+        if (encounter == null) {
+            String worldKey = player.getWorld().getRegistryKey().getValue().toString();
+            var shipEntry = SecondDawnRP.TACTICAL_SERVICE.getShipAtPosition(
+                    worldKey, player.getX(), player.getY(), player.getZ());
+            if (shipEntry.isPresent()) {
+                String posShipId = shipEntry.get().getShipId();
+                encounter = encounters.stream()
+                        .filter(e -> e.getShip(posShipId).isPresent())
+                        .findFirst()
+                        .orElse(null);
+                if (encounter == null) {
+                    boolean gmMode = player.hasPermissionLevel(2) && "ALL".equals(stationFilter);
+                    net.shard.seconddawnrp.tactical.network.TacticalNetworking
+                            .sendOpenPacket(player, null, stationFilter, gmMode);
+                    return;
+                }
+            }
+        }
+
+        // 3. Fall back to first active/paused encounter
+        if (encounter == null) {
+            encounter = encounters.stream()
+                    .filter(e -> e.getStatus() ==
+                            net.shard.seconddawnrp.tactical.data.EncounterState.Status.ACTIVE
+                            || e.getStatus() ==
+                            net.shard.seconddawnrp.tactical.data.EncounterState.Status.PAUSED)
+                    .findFirst()
+                    .orElse(encounters.isEmpty() ? null : encounters.iterator().next());
+        }
 
         boolean gmMode = player.hasPermissionLevel(2) && "ALL".equals(stationFilter);
         net.shard.seconddawnrp.tactical.network.TacticalNetworking
@@ -151,15 +210,9 @@ public class TerminalDesignatorService {
 
     // ── Ship origin lookup ────────────────────────────────────────────────────
 
-    /**
-     * Returns the nearest SHIP_ORIGIN designator to the given player.
-     * Used by TacticalScreen to center the standby map on the correct ship.
-     * Returns null if none registered within 512 blocks.
-     */
-    public net.minecraft.util.math.BlockPos getShipOriginNear(
-            ServerPlayerEntity player, ServerWorld world) {
+    public BlockPos getShipOriginNear(ServerPlayerEntity player, ServerWorld world) {
         String worldKey = world.getRegistryKey().getValue().toString();
-        net.minecraft.util.math.BlockPos center = player.getBlockPos();
+        BlockPos center = player.getBlockPos();
 
         return SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY
                 .getNearby(worldKey, center, 512)
@@ -196,13 +249,17 @@ public class TerminalDesignatorService {
                 SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY.get(worldKey, pos);
         if (optional.isEmpty()) return;
 
-        TerminalDesignatorType type = optional.get().getType();
+        TerminalDesignatorEntry e = optional.get();
+        TerminalDesignatorType type = e.getType();
+
+        // Show ship binding in the action bar prompt if set
+        String shipSuffix = e.hasShipBinding() ? "  §8[" + e.getShipId() + "]" : "";
 
         Text prompt = Text.literal("")
                 .append(Text.literal("[ " + type.getDisplayName() + " ]")
                         .withColor(type.isImplemented() ? type.getGlowColor() : 0xAAAAAA))
                 .append(Text.literal(type.isImplemented()
-                        ? "  §7Right-click to open"
+                        ? "  §7Right-click to open" + shipSuffix
                         : "  §8Not yet active"));
 
         player.sendMessage(prompt, true);
@@ -245,12 +302,10 @@ public class TerminalDesignatorService {
         spawnEdge(world, player, fx, x1, y0, z0, x1, y0, z1);
         spawnEdge(world, player, fx, x1, y0, z1, x0, y0, z1);
         spawnEdge(world, player, fx, x0, y0, z1, x0, y0, z0);
-
         spawnEdge(world, player, fx, x0, y1, z0, x1, y1, z0);
         spawnEdge(world, player, fx, x1, y1, z0, x1, y1, z1);
         spawnEdge(world, player, fx, x1, y1, z1, x0, y1, z1);
         spawnEdge(world, player, fx, x0, y1, z1, x0, y1, z0);
-
         spawnEdge(world, player, fx, x0, y0, z0, x0, y1, z0);
         spawnEdge(world, player, fx, x1, y0, z0, x1, y1, z0);
         spawnEdge(world, player, fx, x1, y0, z1, x1, y1, z1);

@@ -20,19 +20,27 @@ import net.shard.seconddawnrp.SecondDawnRP;
 import java.util.List;
 
 /**
- * Terminal Designator Tool — right-click any block to assign a TerminalDesignatorType to it.
+ * Terminal Designator Tool — right-click any block to assign a TerminalDesignatorType to it,
+ * optionally binding it to a registered ship.
  *
  * Controls:
- *   Right-click air            → cycle terminal type
- *   Right-click block          → designate block at current type
- *   Sneak + right-click air    → list all nearby designations (within 48 blocks)
- *   Sneak + right-click block  → remove designation from block
+ *   Right-click block              → designate block with current type + ship context
+ *   Sneak + right-click block      → remove designation from block
+ *   Right-click air                → cycle terminal type
+ *   Sneak + right-click air        → show current status (type + ship context)
  *
- * Permission: requires op level 2 (admin). Same check as TaskTerminalToolItem.
+ * Ship context:
+ *   Set via: /terminal ship settarget <shipId>   (while holding this tool)
+ *   Clear via: /terminal ship settarget clear
+ *   When set, all designations also bind to that ship.
+ *   Terminals without a ship binding fall back to position-based resolution.
+ *
+ * Permission: op level 2 or st.gm.use.
  */
 public class TerminalDesignatorToolItem extends Item {
 
     private static final String NBT_TYPE = "DesignatorType";
+    private static final String NBT_SHIP = "ShipContext";
 
     public TerminalDesignatorToolItem(Settings settings) {
         super(settings);
@@ -65,16 +73,19 @@ public class TerminalDesignatorToolItem extends Item {
             return ActionResult.SUCCESS;
         }
 
-        // Right-click block = designate
+        // Right-click block = designate with current type + ship context
         TerminalDesignatorType type = readType(context.getStack());
-        SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY.register(worldKey, pos, type);
+        String shipId = readShip(context.getStack()); // may be null
 
+        SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY.register(worldKey, pos, type, shipId);
+
+        String shipSuffix = shipId != null ? " §7[ship: §b" + shipId + "§7]" : " §8[no ship binding]";
         player.sendMessage(Text.literal(
                 "§b[Terminal] Designated §f" + type.getDisplayName()
-                        + "§b at " + pos.toShortString()
+                        + "§b at " + pos.toShortString() + shipSuffix
         ), false);
 
-        // Refresh glow immediately so the newly placed terminal lights up
+        // Refresh glow immediately
         if (world instanceof ServerWorld sw) {
             SecondDawnRP.TERMINAL_DESIGNATOR_SERVICE.refreshGlowForPlayer(player, sw);
         }
@@ -85,10 +96,13 @@ public class TerminalDesignatorToolItem extends Item {
     // ── Right-click in air ────────────────────────────────────────────────────
 
     @Override
-    public TypedActionResult<ItemStack> use(World world, net.minecraft.entity.player.PlayerEntity playerEntity, Hand hand) {
+    public TypedActionResult<ItemStack> use(World world,
+                                            net.minecraft.entity.player.PlayerEntity playerEntity,
+                                            Hand hand) {
         ItemStack stack = playerEntity.getStackInHand(hand);
         if (world.isClient) return TypedActionResult.success(stack);
-        if (!(playerEntity instanceof ServerPlayerEntity player)) return TypedActionResult.pass(stack);
+        if (!(playerEntity instanceof ServerPlayerEntity player))
+            return TypedActionResult.pass(stack);
 
         if (!hasPermission(player)) {
             player.sendMessage(Text.literal("[Terminal] No permission."), false);
@@ -96,8 +110,8 @@ public class TerminalDesignatorToolItem extends Item {
         }
 
         if (player.isSneaking()) {
-            // Sneak + right-click air = list nearby designations
-            listNearby(player, world);
+            // Sneak + right-click air = show current context
+            showStatus(player, stack);
             return TypedActionResult.success(stack);
         }
 
@@ -107,7 +121,7 @@ public class TerminalDesignatorToolItem extends Item {
         writeType(stack, next);
 
         player.sendMessage(Text.literal(
-                "§b[Terminal] Type set to: §f" + next.getDisplayName()
+                "§b[Terminal] Type: §f" + next.getDisplayName()
                         + (next.isImplemented() ? "" : " §7(not yet implemented)")
         ), false);
 
@@ -120,38 +134,107 @@ public class TerminalDesignatorToolItem extends Item {
     public void appendTooltip(ItemStack stack, TooltipContext context,
                               List<Text> tooltip, TooltipType type) {
         TerminalDesignatorType current = readType(stack);
+        String shipId = readShip(stack);
+
         tooltip.add(Text.literal("Type: " + current.getDisplayName())
                 .withColor(current.getGlowColor()));
         if (!current.isImplemented()) {
             tooltip.add(Text.literal("  (screen not yet built)").withColor(0x888888));
         }
+
+        if (shipId != null) {
+            tooltip.add(Text.literal("Ship: " + shipId).withColor(0x55FFFF));
+        } else {
+            tooltip.add(Text.literal("Ship: none — /terminal ship settarget <id>")
+                    .withColor(0x555555));
+        }
+
         tooltip.add(Text.literal("Right-click air: cycle type").withColor(0x888888));
-        tooltip.add(Text.literal("Sneak+right-click air: list nearby").withColor(0x888888));
+        tooltip.add(Text.literal("Sneak+right-click air: show status").withColor(0x888888));
         tooltip.add(Text.literal("Right-click block: designate").withColor(0x888888));
         tooltip.add(Text.literal("Sneak+right-click block: remove").withColor(0x888888));
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Ship context (called from command) ────────────────────────────────────
 
-    private void listNearby(ServerPlayerEntity player, World world) {
-        String worldKey = world.getRegistryKey().getValue().toString();
-        BlockPos center = player.getBlockPos();
-        var nearby = SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY.getNearby(worldKey, center, 48);
-
-        if (nearby.isEmpty()) {
-            player.sendMessage(Text.literal("§7[Terminal] No designations within 48 blocks."), false);
+    /**
+     * Set the ship context on the tool item in the player's main hand.
+     * Pass null or "clear" to remove the binding.
+     * Called by: /terminal ship settarget <shipId|clear>
+     */
+    public static void setShipContext(ServerPlayerEntity player, String shipId) {
+        ItemStack stack = player.getMainHandStack();
+        if (!(stack.getItem() instanceof TerminalDesignatorToolItem)) {
+            player.sendMessage(Text.literal(
+                            "[Terminal] Hold the Terminal Designator Tool.")
+                    .formatted(net.minecraft.util.Formatting.RED), false);
             return;
         }
 
-        player.sendMessage(Text.literal("§b[Terminal] Nearby designations (" + nearby.size() + "):"), false);
-        for (var entry : nearby) {
-            BlockPos p = entry.getPos();
-            int dist = (int) Math.sqrt(center.getSquaredDistance(p));
+        NbtCompound nbt = getOrCreateNbt(stack);
+        boolean clearing = shipId == null || shipId.equalsIgnoreCase("clear");
+
+        if (clearing) {
+            nbt.remove(NBT_SHIP);
+            stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(nbt));
             player.sendMessage(Text.literal(
-                    "  §f" + entry.getType().getDisplayName()
-                            + " §7@ " + p.toShortString()
-                            + " (" + dist + "m)"
-            ), false);
+                            "[Terminal] Ship context cleared. Designations will have no ship binding.")
+                    .formatted(net.minecraft.util.Formatting.YELLOW), false);
+        } else {
+            nbt.putString(NBT_SHIP, shipId);
+            stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(nbt));
+            player.sendMessage(Text.literal(
+                            "[Terminal] Ship context: §b" + shipId
+                                    + "§r\nNew designations will be bound to this ship.")
+                    .formatted(net.minecraft.util.Formatting.GREEN), false);
+        }
+    }
+
+    /**
+     * Read the ship context from the tool. Returns null if not set.
+     * Public so TerminalDesignatorService can read it if needed.
+     */
+    public static String getShipContext(ItemStack stack) {
+        NbtCompound nbt = getOrCreateNbt(stack);
+        String id = nbt.getString(NBT_SHIP);
+        return id.isEmpty() ? null : id;
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private void showStatus(ServerPlayerEntity player, ItemStack stack) {
+        TerminalDesignatorType type = readType(stack);
+        String shipId = readShip(stack);
+
+        player.sendMessage(Text.literal("§b[Terminal] Current context:"), false);
+        player.sendMessage(Text.literal(
+                "  Type: §f" + type.getDisplayName()
+                        + (type.isImplemented() ? "" : " §7(not yet implemented)")), false);
+        player.sendMessage(Text.literal(
+                "  Ship: " + (shipId != null
+                        ? "§b" + shipId
+                        : "§8none — use /terminal ship settarget <shipId>")), false);
+        player.sendMessage(Text.literal(
+                "§7Right-click air to cycle type. "
+                        + "Right-click block to designate."), false);
+
+        // Also list nearby designations
+        String worldKey = player.getWorld().getRegistryKey().getValue().toString();
+        BlockPos center = player.getBlockPos();
+        var nearby = SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY.getNearby(worldKey, center, 48);
+        if (!nearby.isEmpty()) {
+            player.sendMessage(Text.literal(
+                    "§b[Terminal] Nearby (" + nearby.size() + "):"), false);
+            for (var entry : nearby) {
+                BlockPos p = entry.getPos();
+                int dist = (int) Math.sqrt(center.getSquaredDistance(p));
+                String entryShip = entry.hasShipBinding()
+                        ? " §8[§b" + entry.getShipId() + "§8]" : " §8[unbound]";
+                player.sendMessage(Text.literal(
+                        "  §f" + entry.getType().getDisplayName()
+                                + " §7@ " + p.toShortString()
+                                + " (" + dist + "m)" + entryShip), false);
+            }
         }
     }
 
@@ -165,13 +248,19 @@ public class TerminalDesignatorToolItem extends Item {
         }
     }
 
+    private String readShip(ItemStack stack) {
+        NbtCompound nbt = getOrCreateNbt(stack);
+        String id = nbt.getString(NBT_SHIP);
+        return id.isEmpty() ? null : id;
+    }
+
     private void writeType(ItemStack stack, TerminalDesignatorType type) {
         NbtCompound nbt = getOrCreateNbt(stack);
         nbt.putString(NBT_TYPE, type.name());
         stack.set(DataComponentTypes.CUSTOM_DATA, NbtComponent.of(nbt));
     }
 
-    private NbtCompound getOrCreateNbt(ItemStack stack) {
+    private static NbtCompound getOrCreateNbt(ItemStack stack) {
         NbtComponent component = stack.get(DataComponentTypes.CUSTOM_DATA);
         return component == null ? new NbtCompound() : component.copyNbt();
     }

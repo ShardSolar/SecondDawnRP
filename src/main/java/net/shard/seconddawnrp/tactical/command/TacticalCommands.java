@@ -361,6 +361,80 @@ public class TacticalCommands {
         ); // end dispatcher.register(/tactical)
 
         // ═════════════════════════════════════════════════════════════════════
+        // /terminal
+        // ═════════════════════════════════════════════════════════════════════
+        dispatcher.register(CommandManager.literal("terminal")
+                .requires(src -> src.hasPermissionLevel(2))
+
+                // /terminal ship settarget <shipId|clear>
+                // Sets the ship context on the Terminal Designator Tool in main hand.
+                // All subsequent block designations will include this ship binding.
+                .then(CommandManager.literal("ship")
+                        .then(CommandManager.literal("settarget")
+                                .then(CommandManager.argument("shipId", StringArgumentType.word())
+                                        .suggests(SUGGEST_REGISTRY_SHIPS)
+                                        .executes(ctx -> {
+                                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                            if (p == null) { feedback(ctx.getSource(), "Only players can use this.", Formatting.RED); return 0; }
+                                            String sid = StringArgumentType.getString(ctx, "shipId");
+                                            boolean clearing = sid.equalsIgnoreCase("clear");
+                                            if (!clearing
+                                                    && !SecondDawnRP.ENCOUNTER_SERVICE.getShipRegistry().containsKey(sid)) {
+                                                feedback(ctx.getSource(), "Ship '" + sid + "' not found in registry.", Formatting.RED);
+                                                return 0;
+                                            }
+                                            net.shard.seconddawnrp.terminal.TerminalDesignatorToolItem
+                                                    .setShipContext(p, clearing ? null : sid);
+                                            return 1;
+                                        })))
+
+                        // /terminal ship assign <worldKey> <x> <y> <z> <shipId>
+                        // Assign a ship binding to an already-designated terminal at the given position.
+                        // Use when you forgot to set the ship context before designating.
+                        .then(CommandManager.literal("assign")
+                                .then(CommandManager.argument("x", IntegerArgumentType.integer())
+                                        .then(CommandManager.argument("y", IntegerArgumentType.integer())
+                                                .then(CommandManager.argument("z", IntegerArgumentType.integer())
+                                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
+                                                                .suggests(SUGGEST_REGISTRY_SHIPS)
+                                                                .executes(ctx -> {
+                                                                    ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                                                    if (p == null) { feedback(ctx.getSource(), "Only players can use this.", Formatting.RED); return 0; }
+                                                                    BlockPos pos = new BlockPos(
+                                                                            IntegerArgumentType.getInteger(ctx, "x"),
+                                                                            IntegerArgumentType.getInteger(ctx, "y"),
+                                                                            IntegerArgumentType.getInteger(ctx, "z"));
+                                                                    String worldKey = p.getWorld().getRegistryKey().getValue().toString();
+                                                                    String sid = StringArgumentType.getString(ctx, "shipId");
+                                                                    boolean updated = SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY
+                                                                            .setShipId(worldKey, pos, sid);
+                                                                    if (!updated) {
+                                                                        feedback(ctx.getSource(), "No terminal designated at " + pos.toShortString() + ".", Formatting.RED);
+                                                                        return 0;
+                                                                    }
+                                                                    feedback(ctx.getSource(),
+                                                                            "Terminal at " + pos.toShortString() + " bound to ship '" + sid + "'.",
+                                                                            Formatting.GREEN);
+                                                                    return 1;
+                                                                }))))))
+
+                        // /terminal ship list
+                        // List all designations and their ship bindings.
+                        .then(CommandManager.literal("list")
+                                .executes(ctx -> {
+                                    var all = SecondDawnRP.TERMINAL_DESIGNATOR_REGISTRY.getAll();
+                                    if (all.isEmpty()) { feedback(ctx.getSource(), "No terminals designated.", Formatting.GRAY); return 0; }
+                                    feedback(ctx.getSource(), "── Terminal Designations (" + all.size() + ") ──", Formatting.AQUA);
+                                    all.forEach(e -> feedback(ctx.getSource(),
+                                            "  " + e.getType().getDisplayName()
+                                                    + " @ " + e.getPos().toShortString()
+                                                    + (e.hasShipBinding() ? " §b[" + e.getShipId() + "]" : " §8[unbound]"),
+                                            Formatting.WHITE));
+                                    return all.size();
+                                })))
+        ); // end dispatcher.register(/terminal)
+
+        // ═════════════════════════════════════════════════════════════════════
         // /admin
         // ═════════════════════════════════════════════════════════════════════
         dispatcher.register(CommandManager.literal("admin")
