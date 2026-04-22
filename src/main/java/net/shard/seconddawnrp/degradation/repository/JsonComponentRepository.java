@@ -28,6 +28,10 @@ import java.util.UUID;
  * Writes are atomic: the new payload is written to a {@code .tmp} file
  * and then moved over the existing file, preventing partial writes on
  * server crash.
+ *
+ * <p>V15: {@code shipId} field added to serialization. Missing key on load
+ * defaults to {@code null} (unowned/global) — existing component files are
+ * backward-compatible with no manual migration required.
  */
 public class JsonComponentRepository implements ComponentRepository {
 
@@ -128,64 +132,63 @@ public class JsonComponentRepository implements ComponentRepository {
 
     private static JsonObject toJson(ComponentEntry e) {
         JsonObject obj = new JsonObject();
-        obj.addProperty("componentId", e.getComponentId());
-        obj.addProperty("worldKey", e.getWorldKey());
-        obj.addProperty("blockPosLong", e.getBlockPosLong());
-        obj.addProperty("blockTypeId", e.getBlockTypeId());
-        obj.addProperty("displayName", e.getDisplayName());
-        obj.addProperty("health", e.getHealth());
-        obj.addProperty("status", e.getStatus().name());
-        obj.addProperty("missingBlock", e.isMissingBlock());
-        obj.addProperty("lastDrainTickMs", e.getLastDrainTickMs());
+        obj.addProperty("componentId",       e.getComponentId());
+        obj.addProperty("worldKey",          e.getWorldKey());
+        obj.addProperty("blockPosLong",      e.getBlockPosLong());
+        obj.addProperty("blockTypeId",       e.getBlockTypeId());
+        obj.addProperty("displayName",       e.getDisplayName());
+        obj.addProperty("health",            e.getHealth());
+        obj.addProperty("status",            e.getStatus().name());
+        obj.addProperty("missingBlock",      e.isMissingBlock());
+        obj.addProperty("lastDrainTickMs",   e.getLastDrainTickMs());
         obj.addProperty("lastTaskGeneratedMs", e.getLastTaskGeneratedMs());
         obj.addProperty("registeredByUuid",
                 e.getRegisteredByUuid() != null ? e.getRegisteredByUuid().toString() : null);
-        obj.addProperty("repairItemId", e.getRepairItemId());
-        obj.addProperty("repairItemCount", e.getRepairItemCount());
+        obj.addProperty("repairItemId",      e.getRepairItemId());
+        obj.addProperty("repairItemCount",   e.getRepairItemCount());
+        // V15 — null written as JSON null; absent on read defaults to null (backward compat)
+        if (e.getShipId() != null) {
+            obj.addProperty("shipId", e.getShipId());
+        } else {
+            obj.add("shipId", com.google.gson.JsonNull.INSTANCE);
+        }
         return obj;
     }
 
     private static ComponentEntry fromJson(JsonObject obj) {
-        String componentId = obj.get("componentId").getAsString();
-        String worldKey = obj.get("worldKey").getAsString();
-        long blockPosLong = obj.get("blockPosLong").getAsLong();
-        String blockTypeId = obj.get("blockTypeId").getAsString();
-        String displayName = obj.get("displayName").getAsString();
-        int health = obj.get("health").getAsInt();
-        ComponentStatus status = ComponentStatus.valueOf(obj.get("status").getAsString());
-        long lastDrainTickMs = obj.get("lastDrainTickMs").getAsLong();
-        long lastTaskGeneratedMs = obj.get("lastTaskGeneratedMs").getAsLong();
+        String componentId       = obj.get("componentId").getAsString();
+        String worldKey          = obj.get("worldKey").getAsString();
+        long   blockPosLong      = obj.get("blockPosLong").getAsLong();
+        String blockTypeId       = obj.get("blockTypeId").getAsString();
+        String displayName       = obj.get("displayName").getAsString();
+        int    health            = obj.get("health").getAsInt();
+        ComponentStatus status   = ComponentStatus.valueOf(obj.get("status").getAsString());
+        long   lastDrainTickMs   = obj.get("lastDrainTickMs").getAsLong();
+        long   lastTaskGeneratedMs = obj.get("lastTaskGeneratedMs").getAsLong();
 
         String registeredByStr = obj.has("registeredByUuid")
                 && !obj.get("registeredByUuid").isJsonNull()
                 ? obj.get("registeredByUuid").getAsString() : null;
-
         UUID registeredByUuid = registeredByStr != null
                 ? UUID.fromString(registeredByStr) : null;
 
         String repairItemId = obj.has("repairItemId") && !obj.get("repairItemId").isJsonNull()
                 ? obj.get("repairItemId").getAsString() : null;
-
         int repairItemCount = obj.has("repairItemCount")
                 ? obj.get("repairItemCount").getAsInt() : 0;
 
-        // 🔥 NEW FIELD (safe default for now)
-        boolean missingBlock = obj.has("missingBlock") && obj.get("missingBlock").getAsBoolean();
+        boolean missingBlock = obj.has("missingBlock")
+                && obj.get("missingBlock").getAsBoolean();
+
+        // V15 — defaults to null if key absent (pre-V15 file) or explicitly null
+        String shipId = obj.has("shipId") && !obj.get("shipId").isJsonNull()
+                ? obj.get("shipId").getAsString() : null;
 
         return new ComponentEntry(
-                componentId,
-                worldKey,
-                blockPosLong,
-                blockTypeId,
-                displayName,
-                health,
-                status,
-                lastDrainTickMs,
-                lastTaskGeneratedMs,
-                registeredByUuid,
-                repairItemId,
-                repairItemCount,
-                missingBlock
+                componentId, worldKey, blockPosLong, blockTypeId, displayName,
+                health, status, lastDrainTickMs, lastTaskGeneratedMs,
+                registeredByUuid, repairItemId, repairItemCount, missingBlock,
+                shipId
         );
     }
 }

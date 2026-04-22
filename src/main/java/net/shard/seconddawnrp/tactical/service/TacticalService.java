@@ -1,31 +1,32 @@
 package net.shard.seconddawnrp.tactical.service;
 
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.shard.seconddawnrp.tactical.data.*;
 import net.shard.seconddawnrp.tactical.network.TacticalNetworking;
 
-import java.util.Optional;
+import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
 /**
  * Encounter tick orchestrator. Runs on END_SERVER_TICK every 100 ticks (5 seconds).
  *
+ * Ship registry source of truth: EncounterService.shipRegistry.
+ * TacticalService keeps a local shipRegistryCache for fast position lookups
+ * (getPlayersOnShip, getShipAtPosition). Cache is populated from EncounterService
+ * on loadFromDatabase() and updated via syncShipRegistryEntry() on any mutation.
+ *
  * Tick order:
- *   1. Power      — warp core output → power budget distribution
- *   2. Penalties  — destroyed zone effects clamped onto live stats
- *   3. Movement   — heading/speed/position interpolation
- *   4. Shields    — suppression tick + regen
- *   5. Weapons    — hardpoint cooldown ticks
- *   6. Fire       — queued weapon fire resolved
- *   7. Warp       — warp state update
- *   8. Hull check — destroyed ships handled
- *   9. Broadcast  — encounter state pushed to all open tactical screens
+ *   1. Power, 2. Penalties, 3. Movement, 4. Shields, 5. Weapons,
+ *   6. Fire, 7. Warp, 8. Hull check, 9. Broadcast
  */
 public class TacticalService {
 
-    private static final int TICK_INTERVAL = 100; // 5 seconds at 20 TPS
+    private static final int TICK_INTERVAL = 100;
 
     private final EncounterService    encounterService;
+    private final TacticalRepository  repository;
     private final ShipMovementService movementService;
     private final ShieldService       shieldService;
     private final WeaponService       weaponService;
@@ -35,14 +36,23 @@ public class TacticalService {
 
     private MinecraftServer server;
 
+    /**
+     * Local cache of ShipRegistryEntry for fast position lookups.
+     * NOT the source of truth — EncounterService is.
+     * Updated on loadFromDatabase() and via syncShipRegistryEntry().
+     */
+    private final Map<String, ShipRegistryEntry> shipRegistryCache = new ConcurrentHashMap<>();
+
     private final ConcurrentLinkedQueue<PendingFireAction> pendingFire =
             new ConcurrentLinkedQueue<>();
 
     public TacticalService(EncounterService encounterService,
                            TacticalRepository repository) {
         this.encounterService  = encounterService;
+        this.repository        = repository;
         this.hullDamageService = new HullDamageService();
         this.hullDamageService.setRepository(repository);
+        this.hullDamageService.setTacticalService(this);
         this.shieldService     = new ShieldService();
         this.shieldService.setHullDamageService(hullDamageService);
         this.movementService   = new ShipMovementService();
@@ -56,11 +66,111 @@ public class TacticalService {
     // ── Database load ─────────────────────────────────────────────────────────
 
     /**
-     * Load zone block registrations from the database.
-     * Called at server start after EncounterService.loadFromDatabase().
+     * Load zone blocks from DB and mirror EncounterService's ship registry into cache.
+     * Called at SERVER_STARTED strictly after EncounterService.loadFromDatabase().
      */
     public void loadFromDatabase() {
         hullDamageService.loadFromDatabase();
+
+        shipRegistryCache.clear();
+        shipRegistryCache.putAll(encounterService.getShipRegistry());
+        System.out.println("[Tactical] Ship registry cache: "
+                + shipRegistryCache.size() + " ship(s) mirrored from EncounterService.");
+    }
+
+    // ── Ship registry cache sync ──────────────────────────────────────────────
+
+    /**
+     * Push an updated ShipRegistryEntry into the local cache.
+     * Call this after any mutation (bounds, home ship flag, etc.) that has
+     * already been persisted via EncounterService.saveShipRegistryEntry().
+     */
+    public void syncShipRegistryEntry(ShipRegistryEntry entry) {
+        shipRegistryCache.put(entry.getShipId(), entry);
+    }
+
+    /**
+     * Set the real bounding box for a ship.
+     * Writes to EncounterService (authoritative), persists to DB, then syncs cache.
+     * Called by: /admin ship bounds <shipId> <x1 y1 z1> <x2 y2 z2>
+     */
+    public boolean setShipBounds(String shipId,
+                                 net.minecraft.util.math.BlockPos corner1,
+                                 net.minecraft.util.math.BlockPos corner2) {
+        Optional<ShipRegistryEntry> opt = encounterService.getShipEntry(shipId);
+        if (opt.isEmpty()) return false;
+
+        ShipRegistryEntry entry = opt.get();
+        entry.setRealBounds(corner1, corner2);
+        encounterService.saveShipRegistryEntry(entry);
+        shipRegistryCache.put(shipId, entry);
+
+        System.out.println("[Tactical] Bounds set for " + shipId
+                + ": " + corner1 + " → " + corner2);
+        return true;
+    }
+
+    // ── Ship registry accessors ───────────────────────────────────────────────
+
+    /** Live entry from EncounterService, falling back to cache. */
+    public Optional<ShipRegistryEntry> getShipRegistryEntry(String shipId) {
+        return encounterService.getShipEntry(shipId)
+                .or(() -> Optional.ofNullable(shipRegistryCache.get(shipId)));
+    }
+
+    public Collection<ShipRegistryEntry> getAllShipRegistryEntries() {
+        return encounterService.getShipRegistry().values();
+    }
+
+    // ── Ship-scoped player resolution ─────────────────────────────────────────
+
+    /**
+     * Returns all online players inside the registered bounding box of shipId.
+     * Returns empty list if the ship has no bounds configured — does NOT fall
+     * back to all players.
+     */
+    public List<ServerPlayerEntity> getPlayersOnShip(String shipId, MinecraftServer server) {
+        if (server == null) return List.of();
+
+        ShipRegistryEntry entry = encounterService.getShipEntry(shipId)
+                .orElse(shipRegistryCache.get(shipId));
+        if (entry == null || !entry.hasBounds()) return List.of();
+
+        String shipWorldKey = entry.getRealShipWorldKey();
+
+        List<ServerPlayerEntity> result = new ArrayList<>();
+        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+            if (shipWorldKey != null) {
+                String pw = player.getWorld().getRegistryKey().getValue().toString();
+                if (!pw.equals(shipWorldKey)) continue;
+            }
+            if (entry.containsPosition(player.getX(), player.getY(), player.getZ())) {
+                result.add(player);
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Resolve which registered ship (if any) contains the given world position.
+     * Checks EncounterService live registry first, then local cache.
+     * Used by DegradationService for Engineering Pad filtering.
+     */
+    public Optional<ShipRegistryEntry> getShipAtPosition(String worldKey,
+                                                         double x, double y, double z) {
+        for (ShipRegistryEntry e : encounterService.getShipRegistry().values()) {
+            if (!e.hasBounds()) continue;
+            if (e.getRealShipWorldKey() != null
+                    && !e.getRealShipWorldKey().equals(worldKey)) continue;
+            if (e.containsPosition(x, y, z)) return Optional.of(e);
+        }
+        for (ShipRegistryEntry e : shipRegistryCache.values()) {
+            if (!e.hasBounds()) continue;
+            if (e.getRealShipWorldKey() != null
+                    && !e.getRealShipWorldKey().equals(worldKey)) continue;
+            if (e.containsPosition(x, y, z)) return Optional.of(e);
+        }
+        return Optional.empty();
     }
 
     // ── addShip wrapper ───────────────────────────────────────────────────────
@@ -69,13 +179,11 @@ public class TacticalService {
                           String faction, String controlMode) {
         String result = encounterService.addShip(
                 encounterId, shipId, shipClass, faction, controlMode);
-
         if (result.startsWith("Added")) {
             encounterService.getEncounter(encounterId)
                     .flatMap(e -> e.getShip(shipId))
                     .ifPresent(hullDamageService::initZonesForShip);
         }
-
         return result;
     }
 
@@ -83,7 +191,6 @@ public class TacticalService {
 
     public void tick(MinecraftServer server, int currentTick) {
         if (currentTick % TICK_INTERVAL != 0) return;
-
         for (EncounterState encounter : encounterService.getAllEncounters()) {
             if (!encounter.isActive()) continue;
             tickEncounter(encounter);
@@ -91,32 +198,20 @@ public class TacticalService {
     }
 
     private void tickEncounter(EncounterState encounter) {
-        // 1. Power
         powerService.tick(encounter);
 
-        // 2. Zone penalties
         for (ShipState ship : encounter.getAllShips()) {
             if (ship.isDestroyed()) continue;
             ShipClassDefinition def = ShipClassDefinition.get(ship.getShipClass()).orElse(null);
             if (def != null) hullDamageService.applyZonePenalties(ship, def);
         }
 
-        // 3. Movement
         movementService.tick(encounter);
-
-        // 4. Shields
         shieldService.tick(encounter);
-
-        // 5. Weapon cooldowns
         weaponService.tick(encounter);
-
-        // 6. Queued fire
         resolvePendingFire(encounter);
-
-        // 7. Warp
         warpService.tick(encounter, server);
 
-        // 8. Hull check
         for (ShipState ship : encounter.getAllShips()) {
             if (!ship.isDestroyed() && ship.getHullIntegrity() <= 0) {
                 encounterService.handleShipDestroyed(encounter, ship);
@@ -124,7 +219,6 @@ public class TacticalService {
             }
         }
 
-        // 9. Broadcast
         TacticalNetworking.broadcastEncounterUpdate(encounter, server);
     }
 
@@ -135,16 +229,14 @@ public class TacticalService {
                 pendingFire.offer(action);
                 continue;
             }
-
             Optional<ShipState> attacker = encounter.getShip(action.attackerShipId());
             Optional<ShipState> target   = encounter.getShip(action.targetShipId());
             if (attacker.isEmpty() || target.isEmpty()) continue;
 
             ShipState.ShieldFacing facing = null;
             if (action.targetFacing() != null && !"AUTO".equals(action.targetFacing())) {
-                try {
-                    facing = ShipState.ShieldFacing.valueOf(action.targetFacing());
-                } catch (IllegalArgumentException ignored) {}
+                try { facing = ShipState.ShieldFacing.valueOf(action.targetFacing()); }
+                catch (IllegalArgumentException ignored) {}
             }
 
             String result = switch (action.weaponType()) {
@@ -161,10 +253,8 @@ public class TacticalService {
     // ── Action queuing ────────────────────────────────────────────────────────
 
     public void queueWeaponFire(String encounterId, String attackerShipId,
-                                String targetShipId, String weaponType,
-                                String targetFacing) {
-        pendingFire.offer(new PendingFireAction(
-                encounterId, attackerShipId, targetShipId,
+                                String targetShipId, String weaponType, String targetFacing) {
+        pendingFire.offer(new PendingFireAction(encounterId, attackerShipId, targetShipId,
                 weaponType, targetFacing != null ? targetFacing : "AUTO"));
     }
 
@@ -178,8 +268,12 @@ public class TacticalService {
         encounterService.getEncounter(encounterId)
                 .flatMap(e -> e.getShip(shipId))
                 .ifPresent(ship -> {
-                    ship.setTargetHeading(targetHeading);
-                    ship.setTargetSpeed(targetSpeed);
+                    float heading = ((targetHeading % 360f) + 360f) % 360f;
+                    ShipClassDefinition def =
+                            ShipClassDefinition.get(ship.getShipClass()).orElse(null);
+                    float maxSpeed = def != null ? def.getMaxSpeed() : Float.MAX_VALUE;
+                    ship.setTargetHeading(heading);
+                    ship.setTargetSpeed(Math.max(0f, Math.min(targetSpeed, maxSpeed)));
                 });
     }
 
@@ -212,17 +306,25 @@ public class TacticalService {
                 .orElse("Ship or encounter not found.");
     }
 
+    // ── Zone management ───────────────────────────────────────────────────────
+
+    public int clearAllZonesForShip(String shipId) {
+        hullDamageService.clearZonesForShip(shipId);
+        return repository != null ? repository.clearAllZoneBlocksForShip(shipId) : 0;
+    }
+
+    public Map<String, int[]> listZonesForShip(String shipId) {
+        return repository != null ? repository.countZoneBlocksForShip(shipId) : Map.of();
+    }
+
     // ── Accessors ─────────────────────────────────────────────────────────────
 
     public EncounterService  getEncounterService()  { return encounterService; }
     public HullDamageService getHullDamageService() { return hullDamageService; }
     public WarpService       getWarpService()       { return warpService; }
+    public MinecraftServer   getServer()            { return server; }
 
     private record PendingFireAction(
-            String encounterId,
-            String attackerShipId,
-            String targetShipId,
-            String weaponType,
-            String targetFacing
-    ) {}
+            String encounterId, String attackerShipId, String targetShipId,
+            String weaponType, String targetFacing) {}
 }

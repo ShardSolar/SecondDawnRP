@@ -8,6 +8,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Types;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
@@ -18,9 +19,10 @@ import java.util.UUID;
  * SQL-backed component repository targeting the {@code components} table
  * added in schema version 3.
  *
- * <p>This is the migration-path implementation. It is wired in once
- * the server has been running schema v3 without issues. Until then,
- * {@link JsonComponentRepository} is the primary backend.
+ * <p>V15: {@code ship_id} column added via migration. {@code save()} and
+ * {@code saveAll()} write it; {@code fromResultSet()} reads it with a
+ * try/catch fallback to null so the repository works against pre-V15
+ * databases during the migration window.
  */
 public class SqlComponentRepository implements ComponentRepository {
 
@@ -35,24 +37,30 @@ public class SqlComponentRepository implements ComponentRepository {
         String sql = "INSERT OR REPLACE INTO components ("
                 + "component_id, world_key, block_pos_long, block_type_id, display_name, "
                 + "health, status, last_drain_tick_ms, last_task_generated_ms, registered_by_uuid, "
-                + "repair_item_id, repair_item_count, missing_block"
-                + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "repair_item_id, repair_item_count, missing_block, ship_id"
+                + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         try (Connection conn = db.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, entry.getComponentId());
-            ps.setString(2, entry.getWorldKey());
-            ps.setLong(3, entry.getBlockPosLong());
-            ps.setString(4, entry.getBlockTypeId());
-            ps.setString(5, entry.getDisplayName());
-            ps.setInt(6, entry.getHealth());
-            ps.setString(7, entry.getStatus().name());
-            ps.setLong(8, entry.getLastDrainTickMs());
-            ps.setLong(9, entry.getLastTaskGeneratedMs());
+            ps.setString(1,  entry.getComponentId());
+            ps.setString(2,  entry.getWorldKey());
+            ps.setLong(3,    entry.getBlockPosLong());
+            ps.setString(4,  entry.getBlockTypeId());
+            ps.setString(5,  entry.getDisplayName());
+            ps.setInt(6,     entry.getHealth());
+            ps.setString(7,  entry.getStatus().name());
+            ps.setLong(8,    entry.getLastDrainTickMs());
+            ps.setLong(9,    entry.getLastTaskGeneratedMs());
             ps.setString(10, entry.getRegisteredByUuid() != null
                     ? entry.getRegisteredByUuid().toString() : null);
             ps.setString(11, entry.getRepairItemId());
-            ps.setInt(12, entry.getRepairItemCount());
-            ps.setInt(13, entry.isMissingBlock() ? 1 : 0);
+            ps.setInt(12,    entry.getRepairItemCount());
+            ps.setInt(13,    entry.isMissingBlock() ? 1 : 0);
+            // V15 — ship_id nullable
+            if (entry.getShipId() != null) {
+                ps.setString(14, entry.getShipId());
+            } else {
+                ps.setNull(14, Types.VARCHAR);
+            }
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new RuntimeException("Failed to save component " + entry.getComponentId(), e);
@@ -64,26 +72,31 @@ public class SqlComponentRepository implements ComponentRepository {
         String sql = "INSERT OR REPLACE INTO components ("
                 + "component_id, world_key, block_pos_long, block_type_id, display_name, "
                 + "health, status, last_drain_tick_ms, last_task_generated_ms, registered_by_uuid, "
-                + "repair_item_id, repair_item_count"
-                + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
+                + "repair_item_id, repair_item_count, missing_block, ship_id"
+                + ") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)";
         try (Connection conn = db.getConnection();
              PreparedStatement ps = conn.prepareStatement(sql)) {
             conn.setAutoCommit(false);
             for (ComponentEntry entry : entries) {
-                ps.setString(1, entry.getComponentId());
-                ps.setString(2, entry.getWorldKey());
-                ps.setLong(3, entry.getBlockPosLong());
-                ps.setString(4, entry.getBlockTypeId());
-                ps.setString(5, entry.getDisplayName());
-                ps.setInt(6, entry.getHealth());
-                ps.setString(7, entry.getStatus().name());
-                ps.setLong(8, entry.getLastDrainTickMs());
-                ps.setLong(9, entry.getLastTaskGeneratedMs());
+                ps.setString(1,  entry.getComponentId());
+                ps.setString(2,  entry.getWorldKey());
+                ps.setLong(3,    entry.getBlockPosLong());
+                ps.setString(4,  entry.getBlockTypeId());
+                ps.setString(5,  entry.getDisplayName());
+                ps.setInt(6,     entry.getHealth());
+                ps.setString(7,  entry.getStatus().name());
+                ps.setLong(8,    entry.getLastDrainTickMs());
+                ps.setLong(9,    entry.getLastTaskGeneratedMs());
                 ps.setString(10, entry.getRegisteredByUuid() != null
                         ? entry.getRegisteredByUuid().toString() : null);
                 ps.setString(11, entry.getRepairItemId());
-                ps.setInt(12, entry.getRepairItemCount());
-                ps.setInt(13, entry.isMissingBlock() ? 1 : 0);
+                ps.setInt(12,    entry.getRepairItemCount());
+                ps.setInt(13,    entry.isMissingBlock() ? 1 : 0);
+                if (entry.getShipId() != null) {
+                    ps.setString(14, entry.getShipId());
+                } else {
+                    ps.setNull(14, Types.VARCHAR);
+                }
                 ps.addBatch();
             }
             ps.executeBatch();
@@ -166,40 +179,40 @@ public class SqlComponentRepository implements ComponentRepository {
     // ── Mapping ───────────────────────────────────────────────────────────────
 
     private static ComponentEntry fromResultSet(ResultSet rs) throws SQLException {
-        String componentId = rs.getString("component_id");
-        String worldKey = rs.getString("world_key");
-        long blockPosLong = rs.getLong("block_pos_long");
-        String blockTypeId = rs.getString("block_type_id");
-        String displayName = rs.getString("display_name");
-        int health = rs.getInt("health");
+        String componentId     = rs.getString("component_id");
+        String worldKey        = rs.getString("world_key");
+        long   blockPosLong    = rs.getLong("block_pos_long");
+        String blockTypeId     = rs.getString("block_type_id");
+        String displayName     = rs.getString("display_name");
+        int    health          = rs.getInt("health");
         ComponentStatus status = ComponentStatus.valueOf(rs.getString("status"));
-        long lastDrainTickMs = rs.getLong("last_drain_tick_ms");
-        long lastTaskGeneratedMs = rs.getLong("last_task_generated_ms");
+        long   lastDrainTickMs = rs.getLong("last_drain_tick_ms");
+        long   lastTaskGeneratedMs = rs.getLong("last_task_generated_ms");
 
         String uuidStr = rs.getString("registered_by_uuid");
         UUID registeredByUuid = (uuidStr != null && !uuidStr.isBlank())
                 ? UUID.fromString(uuidStr) : null;
 
-        String repairItemId = rs.getString("repair_item_id");
-        int repairItemCount = rs.getInt("repair_item_count");
+        String repairItemId  = rs.getString("repair_item_id");
+        int    repairItemCount = rs.getInt("repair_item_count");
 
-        // 🔥 NEW FIELD (safe default for now)
-        boolean missingBlock = false;
+        // missing_block — in schema since V3 CREATE, always present
+        boolean missingBlock = rs.getInt("missing_block") == 1;
+
+        // V15 — ship_id column added by migration. Use try/catch so this works
+        // against a DB that hasn't run V15 yet (migration window safety net).
+        String shipId = null;
+        try {
+            shipId = rs.getString("ship_id");
+        } catch (SQLException ignored) {
+            // Column not present — pre-V15 DB. Leave shipId as null.
+        }
 
         return new ComponentEntry(
-                componentId,
-                worldKey,
-                blockPosLong,
-                blockTypeId,
-                displayName,
-                health,
-                status,
-                lastDrainTickMs,
-                lastTaskGeneratedMs,
-                registeredByUuid,
-                repairItemId,
-                repairItemCount,
-                missingBlock
+                componentId, worldKey, blockPosLong, blockTypeId, displayName,
+                health, status, lastDrainTickMs, lastTaskGeneratedMs,
+                registeredByUuid, repairItemId, repairItemCount, missingBlock,
+                shipId
         );
     }
 }

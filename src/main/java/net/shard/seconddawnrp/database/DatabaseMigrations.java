@@ -3,10 +3,12 @@ package net.shard.seconddawnrp.database;
 import java.sql.*;
 
 import static net.shard.seconddawnrp.tactical.data.TacticalMigration.applyVersion13;
+import static net.shard.seconddawnrp.tactical.data.TacticalMigration.applyVersion14;
+import static net.shard.seconddawnrp.tactical.data.TacticalMigration.applyVersion15;
 
 public final class DatabaseMigrations {
 
-    public static final int CURRENT_SCHEMA_VERSION = 14;
+    public static final int CURRENT_SCHEMA_VERSION = 15;
 
     public void migrate(Connection connection) throws SQLException {
         createSchemaVersionTableIfMissing(connection);
@@ -25,6 +27,7 @@ public final class DatabaseMigrations {
         if (v < 12) { applyVersion12(connection); setSchemaVersion(connection, 12); v = 12; }
         if (v < 13) { applyVersion13(connection); setSchemaVersion(connection, 13); v = 13; }
         if (v < 14) { applyVersion14(connection); setSchemaVersion(connection, 14); v = 14; }
+        if (v < 15) { applyVersion15(connection); setSchemaVersion(connection, 15); v = 15; }
         if (v > CURRENT_SCHEMA_VERSION)
             throw new SQLException("DB schema " + v + " newer than supported " + CURRENT_SCHEMA_VERSION);
     }
@@ -346,7 +349,6 @@ public final class DatabaseMigrations {
         }
     }
 
-
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     private void execSafe(Connection c, String sql) throws SQLException {
@@ -357,8 +359,5 @@ public final class DatabaseMigrations {
                 throw e;
             }
         }
-    }
-    private void applyVersion14(Connection c) throws SQLException {
-        execSafe(c, "ALTER TABLE components ADD COLUMN missing_block INTEGER NOT NULL DEFAULT 0");
     }
 }

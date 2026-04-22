@@ -5,8 +5,11 @@ import java.sql.SQLException;
 import java.sql.Statement;
 
 /**
- * DB migration V13 — Tactical system tables.
- * Call applyVersion13(connection) from DatabaseMigrations.
+ * DB migrations for the Tactical system.
+ *
+ * V13 — Core tactical tables (ship_registry, hardpoints, zones, encounters, shipyard)
+ * V14 — Persistent ship position for home ship + is_home_ship column on ship_registry
+ * V15 — Ship bounding box on ship_registry + ship_id on components
  */
 public class TacticalMigration {
 
@@ -129,7 +132,7 @@ public class TacticalMigration {
                     "target_speed   REAL NOT NULL DEFAULT 0.0, " +
                     "last_updated  INTEGER NOT NULL DEFAULT 0" +
                     ")");
-            // Add is_home_ship to ship_registry if not already present
+            // is_home_ship — safe to re-run, ignore if already present
             try {
                 s.execute("ALTER TABLE ship_registry ADD COLUMN is_home_ship INTEGER NOT NULL DEFAULT 0");
             } catch (java.sql.SQLException ignored) {
@@ -137,5 +140,53 @@ public class TacticalMigration {
             }
         }
         System.out.println("[SecondDawnRP] Database V14 applied: ship_position table created.");
+    }
+
+    /**
+     * V15 — Ship bounding box for player-on-ship resolution.
+     *
+     * ship_registry gains two packed BlockPos longs representing the
+     * min and max corners of the real ship build's 3D bounding box.
+     * Used by TacticalService.getPlayersOnShip() to scope damage effects,
+     * announcements, and the Engineering Pad component filter to the correct vessel.
+     *
+     * components gains ship_id (nullable) — null = unowned / global component,
+     * non-null = belongs to a specific registered ship. Used to filter the
+     * Engineering Pad to show only components registered to the ship the
+     * Engineering player is currently standing on.
+     */
+    public static void applyVersion15(Connection c) throws SQLException {
+        try (Statement s = c.createStatement()) {
+
+            // Ship bounding box corners — packed BlockPos longs.
+            // Both default to 0 (BlockPos.ORIGIN) which is the "not set" sentinel.
+            // Admin sets via: /tactical ship bounds <shipId> <pos1> <pos2>
+            try {
+                s.execute("ALTER TABLE ship_registry " +
+                        "ADD COLUMN real_bounds_min_long INTEGER NOT NULL DEFAULT 0");
+            } catch (java.sql.SQLException ignored) {}
+
+            try {
+                s.execute("ALTER TABLE ship_registry " +
+                        "ADD COLUMN real_bounds_max_long INTEGER NOT NULL DEFAULT 0");
+            } catch (java.sql.SQLException ignored) {}
+
+            // Component ship binding — null = no ship assigned yet (legacy / global).
+            // Components registered before V15 are left null and continue to
+            // appear in the Engineering Pad regardless of ship context until
+            // an admin re-registers them with a ship assignment.
+            try {
+                s.execute("ALTER TABLE components ADD COLUMN ship_id TEXT");
+            } catch (java.sql.SQLException ignored) {}
+
+            // Index for fast ship-filtered component lookups
+            try {
+                s.execute("CREATE INDEX IF NOT EXISTS idx_components_ship_id " +
+                        "ON components (ship_id)");
+            } catch (java.sql.SQLException ignored) {}
+        }
+
+        System.out.println("[SecondDawnRP] Database V15 applied: " +
+                "ship bounding box columns + component ship_id added.");
     }
 }

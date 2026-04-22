@@ -20,11 +20,13 @@ import net.shard.seconddawnrp.tactical.service.TacticalService;
 /**
  * All Tactical commands with tab completion.
  *
- * GM:    /gm encounter create|addship|start|pause|resume|end|list
- *        /gm ship jump|warp|sublight|status|navstatus|zonedamage|zonerepair|zones
- * Admin: /admin shipyard set
- *        /admin ship register|unregister|list|sethomeship
- *        /admin hardpoint register|list|zone set
+ * GM:       /gm encounter create|addship|start|pause|resume|end|list
+ *           /gm ship jump|warp|sublight|status|navstatus|zonedamage|zonerepair|zones
+ *           /gm ship power|heading|speed|torpedoes|warp|position|homenavstatus
+ * Admin:    /admin shipyard set
+ *           /admin ship register|unregister|list|sethomeship|bounds
+ *           /admin hardpoint register|list|zone|clear|remove|locate
+ * Tactical: /tactical zones clear|list
  */
 public class TacticalCommands {
 
@@ -52,72 +54,41 @@ public class TacticalCommands {
                 try {
                     String eid = StringArgumentType.getString(ctx, "encounterId");
                     SecondDawnRP.ENCOUNTER_SERVICE.getEncounter(eid)
-                            .ifPresent(e -> e.getAllShips()
-                                    .forEach(s -> builder.suggest(s.getShipId())));
+                            .ifPresent(e -> e.getAllShips().forEach(s -> builder.suggest(s.getShipId())));
                 } catch (Exception ignored) {}
                 return builder.buildFuture();
             };
 
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_CLASSES =
-            (ctx, builder) -> {
-                ShipClassDefinition.getAll().forEach(c -> builder.suggest(c.getClassId()));
-                return builder.buildFuture();
-            };
+            (ctx, builder) -> { ShipClassDefinition.getAll().forEach(c -> builder.suggest(c.getClassId())); return builder.buildFuture(); };
 
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_FACTIONS =
-            (ctx, builder) -> {
-                builder.suggest("FRIENDLY");
-                builder.suggest("HOSTILE");
-                return builder.buildFuture();
-            };
+            (ctx, builder) -> { builder.suggest("FRIENDLY"); builder.suggest("HOSTILE"); return builder.buildFuture(); };
 
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_CONTROL_MODES =
-            (ctx, builder) -> {
-                builder.suggest("GM_MANUAL");
-                builder.suggest("PLAYER_CREW");
-                return builder.buildFuture();
-            };
+            (ctx, builder) -> { builder.suggest("GM_MANUAL"); builder.suggest("PLAYER_CREW"); return builder.buildFuture(); };
 
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_ARCS =
-            (ctx, builder) -> {
-                for (HardpointEntry.Arc arc : HardpointEntry.Arc.values())
-                    builder.suggest(arc.name());
-                return builder.buildFuture();
-            };
+            (ctx, builder) -> { for (HardpointEntry.Arc a : HardpointEntry.Arc.values()) builder.suggest(a.name()); return builder.buildFuture(); };
 
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_WEAPON_TYPES =
-            (ctx, builder) -> {
-                for (HardpointEntry.WeaponType wt : HardpointEntry.WeaponType.values())
-                    builder.suggest(wt.name());
-                return builder.buildFuture();
-            };
+            (ctx, builder) -> { for (HardpointEntry.WeaponType t : HardpointEntry.WeaponType.values()) builder.suggest(t.name()); return builder.buildFuture(); };
 
-    /** Suggests zone IDs from all loaded ship class definitions. */
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_ZONE_IDS =
             (ctx, builder) -> {
-                ShipClassDefinition.getAll().stream()
-                        .flatMap(c -> c.getDamageZones().stream())
-                        .distinct()
-                        .forEach(builder::suggest);
+                ShipClassDefinition.getAll().stream().flatMap(c -> c.getDamageZones().stream()).distinct().forEach(builder::suggest);
                 return builder.buildFuture();
             };
 
-    /** Suggests zone IDs present on a specific ship in a named encounter. */
     private static final SuggestionProvider<ServerCommandSource> SUGGEST_SHIP_ZONES =
             (ctx, builder) -> {
                 if (SecondDawnRP.TACTICAL_SERVICE == null) return builder.buildFuture();
                 try {
-                    String eid = StringArgumentType.getString(ctx, "encounterId");
-                    String sid = StringArgumentType.getString(ctx, "shipId");
                     SecondDawnRP.TACTICAL_SERVICE.getHullDamageService()
-                            .getZonesForShip(sid).keySet()
+                            .getZonesForShip(StringArgumentType.getString(ctx, "shipId")).keySet()
                             .forEach(builder::suggest);
                 } catch (Exception ignored) {
-                    // Fall back to all zone IDs from class definitions
-                    ShipClassDefinition.getAll().stream()
-                            .flatMap(c -> c.getDamageZones().stream())
-                            .distinct()
-                            .forEach(builder::suggest);
+                    ShipClassDefinition.getAll().stream().flatMap(c -> c.getDamageZones().stream()).distinct().forEach(builder::suggest);
                 }
                 return builder.buildFuture();
             };
@@ -128,845 +99,464 @@ public class TacticalCommands {
                                 TacticalService tacticalService) {
         EncounterService es = tacticalService.getEncounterService();
 
-        // ── /gm encounter ─────────────────────────────────────────────────────
-
+        // ═════════════════════════════════════════════════════════════════════
+        // /gm
+        // ═════════════════════════════════════════════════════════════════════
         dispatcher.register(CommandManager.literal("gm")
                 .requires(src -> src.hasPermissionLevel(2))
-                .then(CommandManager.literal("encounter")
 
+                .then(CommandManager.literal("encounter")
                         .then(CommandManager.literal("create")
                                 .then(CommandManager.argument("id", StringArgumentType.word())
-                                        .executes(ctx -> {
-                                            String result = es.createEncounter(
-                                                    StringArgumentType.getString(ctx, "id"));
-                                            feedback(ctx.getSource(), result, Formatting.GREEN);
-                                            return 1;
-                                        })))
-
+                                        .executes(ctx -> { feedback(ctx.getSource(), es.createEncounter(StringArgumentType.getString(ctx, "id")), Formatting.GREEN); return 1; })))
                         .then(CommandManager.literal("addship")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_REGISTRY_SHIPS)
-                                                .then(CommandManager.argument("class", StringArgumentType.word())
-                                                        .suggests(SUGGEST_CLASSES)
-                                                        .then(CommandManager.argument("faction", StringArgumentType.word())
-                                                                .suggests(SUGGEST_FACTIONS)
-                                                                .then(CommandManager.argument("mode", StringArgumentType.word())
-                                                                        .suggests(SUGGEST_CONTROL_MODES)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                .then(CommandManager.argument("class", StringArgumentType.word()).suggests(SUGGEST_CLASSES)
+                                                        .then(CommandManager.argument("faction", StringArgumentType.word()).suggests(SUGGEST_FACTIONS)
+                                                                .then(CommandManager.argument("mode", StringArgumentType.word()).suggests(SUGGEST_CONTROL_MODES)
                                                                         .executes(ctx -> {
-                                                                            // Route through TacticalService so zone init fires
-                                                                            String result = tacticalService.addShip(
+                                                                            feedback(ctx.getSource(), tacticalService.addShip(
                                                                                     StringArgumentType.getString(ctx, "encounterId"),
                                                                                     StringArgumentType.getString(ctx, "shipId"),
                                                                                     StringArgumentType.getString(ctx, "class"),
                                                                                     StringArgumentType.getString(ctx, "faction"),
-                                                                                    StringArgumentType.getString(ctx, "mode"));
-                                                                            feedback(ctx.getSource(), result, Formatting.GREEN);
+                                                                                    StringArgumentType.getString(ctx, "mode")), Formatting.GREEN);
                                                                             return 1;
                                                                         })))))))
-
                         .then(CommandManager.literal("start")
-                                .then(CommandManager.argument("id", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .executes(ctx -> {
-                                            String result = es.startEncounter(
-                                                    StringArgumentType.getString(ctx, "id"));
-                                            feedback(ctx.getSource(), result, Formatting.GREEN);
-                                            return 1;
-                                        })))
-
+                                .then(CommandManager.argument("id", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .executes(ctx -> { feedback(ctx.getSource(), es.startEncounter(StringArgumentType.getString(ctx, "id")), Formatting.GREEN); return 1; })))
                         .then(CommandManager.literal("pause")
-                                .then(CommandManager.argument("id", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .executes(ctx -> {
-                                            String result = es.pauseEncounter(
-                                                    StringArgumentType.getString(ctx, "id"));
-                                            feedback(ctx.getSource(), result, Formatting.YELLOW);
-                                            return 1;
-                                        })))
-
+                                .then(CommandManager.argument("id", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .executes(ctx -> { feedback(ctx.getSource(), es.pauseEncounter(StringArgumentType.getString(ctx, "id")), Formatting.YELLOW); return 1; })))
                         .then(CommandManager.literal("resume")
-                                .then(CommandManager.argument("id", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .executes(ctx -> {
-                                            String result = es.resumeEncounter(
-                                                    StringArgumentType.getString(ctx, "id"));
-                                            feedback(ctx.getSource(), result, Formatting.GREEN);
-                                            return 1;
-                                        })))
-
+                                .then(CommandManager.argument("id", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .executes(ctx -> { feedback(ctx.getSource(), es.resumeEncounter(StringArgumentType.getString(ctx, "id")), Formatting.GREEN); return 1; })))
                         .then(CommandManager.literal("end")
-                                .then(CommandManager.argument("id", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
+                                .then(CommandManager.argument("id", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
                                         .then(CommandManager.argument("reason", StringArgumentType.greedyString())
-                                                .executes(ctx -> {
-                                                    String result = es.endEncounter(
-                                                            StringArgumentType.getString(ctx, "id"),
-                                                            StringArgumentType.getString(ctx, "reason"));
-                                                    feedback(ctx.getSource(), result, Formatting.YELLOW);
-                                                    return 1;
-                                                }))))
-
+                                                .executes(ctx -> { feedback(ctx.getSource(), es.endEncounter(StringArgumentType.getString(ctx, "id"), StringArgumentType.getString(ctx, "reason")), Formatting.YELLOW); return 1; }))))
                         .then(CommandManager.literal("list")
                                 .executes(ctx -> {
-                                    var encounters = es.getAllEncounters();
-                                    if (encounters.isEmpty()) {
-                                        feedback(ctx.getSource(), "No active encounters.", Formatting.GRAY);
-                                        return 0;
-                                    }
+                                    var list = es.getAllEncounters();
+                                    if (list.isEmpty()) { feedback(ctx.getSource(), "No active encounters.", Formatting.GRAY); return 0; }
                                     feedback(ctx.getSource(), "── Active Encounters ──", Formatting.AQUA);
-                                    encounters.forEach(e -> feedback(ctx.getSource(),
-                                            "  " + e.getEncounterId()
-                                                    + " [" + e.getStatus().name() + "]"
-                                                    + " — " + e.getShipCount() + " ships",
-                                            Formatting.WHITE));
-                                    return encounters.size();
+                                    list.forEach(e -> feedback(ctx.getSource(), "  " + e.getEncounterId() + " [" + e.getStatus().name() + "] — " + e.getShipCount() + " ships", Formatting.WHITE));
+                                    return list.size();
                                 }))
-                )
-
-                // ── /gm ship ──────────────────────────────────────────────────
+                ) // end /gm encounter
 
                 .then(CommandManager.literal("ship")
-
                         .then(CommandManager.literal("jump")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
-                                                .executes(ctx -> {
-                                                    String result = es.jumpShip(
-                                                            StringArgumentType.getString(ctx, "encounterId"),
-                                                            StringArgumentType.getString(ctx, "shipId"));
-                                                    feedback(ctx.getSource(), result, Formatting.AQUA);
-                                                    return 1;
-                                                }))))
-
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                                .executes(ctx -> { feedback(ctx.getSource(), es.jumpShip(StringArgumentType.getString(ctx, "encounterId"), StringArgumentType.getString(ctx, "shipId")), Formatting.AQUA); return 1; }))))
                         .then(CommandManager.literal("warp")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .then(CommandManager.argument("factor", IntegerArgumentType.integer(1, 9))
-                                                        .executes(ctx -> {
-                                                            String result = tacticalService.engageWarp(
-                                                                    StringArgumentType.getString(ctx, "encounterId"),
-                                                                    StringArgumentType.getString(ctx, "shipId"),
-                                                                    IntegerArgumentType.getInteger(ctx, "factor"));
-                                                            feedback(ctx.getSource(), result, Formatting.GREEN);
-                                                            return 1;
-                                                        })))))
-
+                                                        .executes(ctx -> { feedback(ctx.getSource(), tacticalService.engageWarp(StringArgumentType.getString(ctx, "encounterId"), StringArgumentType.getString(ctx, "shipId"), IntegerArgumentType.getInteger(ctx, "factor")), Formatting.GREEN); return 1; })))))
                         .then(CommandManager.literal("sublight")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .executes(ctx -> {
-                                                    String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                    String sid = StringArgumentType.getString(ctx, "shipId");
-                                                    String result = es.getEncounter(eid)
-                                                            .flatMap(e -> e.getShip(sid))
-                                                            .map(ship -> tacticalService.getWarpService()
-                                                                    .dropToSublight(ship))
-                                                            .orElse("Ship or encounter not found.");
-                                                    feedback(ctx.getSource(), result, Formatting.YELLOW);
+                                                    feedback(ctx.getSource(), es.getEncounter(StringArgumentType.getString(ctx, "encounterId"))
+                                                            .flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId")))
+                                                            .map(s -> tacticalService.getWarpService().dropToSublight(s))
+                                                            .orElse("Ship or encounter not found."), Formatting.YELLOW);
                                                     return 1;
                                                 }))))
-
-                        // /gm ship status <encounterId> <shipId>
                         .then(CommandManager.literal("status")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .executes(ctx -> {
-                                                    String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                    String sid = StringArgumentType.getString(ctx, "shipId");
-                                                    es.getEncounter(eid)
-                                                            .flatMap(e -> e.getShip(sid))
-                                                            .ifPresentOrElse(ship -> {
-                                                                ctx.getSource().sendFeedback(() -> Text.literal(
-                                                                                "[Tactical] " + ship.getRegistryName()
-                                                                                        + " [" + ship.getCombatId() + "]"
-                                                                                        + "\n  Hull: " + ship.getHullIntegrity()
-                                                                                        + "/" + ship.getHullMax()
-                                                                                        + " (" + ship.getHullState().name() + ")"
-                                                                                        + "\n  Shields: F=" + ship.getShield(ShipState.ShieldFacing.FORE)
-                                                                                        + " A=" + ship.getShield(ShipState.ShieldFacing.AFT)
-                                                                                        + " P=" + ship.getShield(ShipState.ShieldFacing.PORT)
-                                                                                        + " S=" + ship.getShield(ShipState.ShieldFacing.STARBOARD)
-                                                                                        + "\n  Power: " + ship.getPowerBudget()
-                                                                                        + " | Warp: " + ship.getWarpSpeed()
-                                                                                        + " | Torpedoes: " + ship.getTorpedoCount())
-                                                                        .formatted(Formatting.AQUA), false);
-                                                            }, () -> feedback(ctx.getSource(),
-                                                                    "Ship not found.", Formatting.RED));
+                                                    es.getEncounter(StringArgumentType.getString(ctx, "encounterId"))
+                                                            .flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId")))
+                                                            .ifPresentOrElse(s -> ctx.getSource().sendFeedback(() -> Text.literal(
+                                                                            "[Tactical] " + s.getRegistryName() + " [" + s.getCombatId() + "]"
+                                                                                    + "\n  Hull: " + s.getHullIntegrity() + "/" + s.getHullMax() + " (" + s.getHullState().name() + ")"
+                                                                                    + "\n  Shields: F=" + s.getShield(ShipState.ShieldFacing.FORE) + " A=" + s.getShield(ShipState.ShieldFacing.AFT) + " P=" + s.getShield(ShipState.ShieldFacing.PORT) + " S=" + s.getShield(ShipState.ShieldFacing.STARBOARD)
+                                                                                    + "\n  Power: " + s.getPowerBudget() + " | Warp: " + s.getWarpSpeed() + " | Torpedoes: " + s.getTorpedoCount()).formatted(Formatting.AQUA), false),
+                                                                    () -> feedback(ctx.getSource(), "Ship not found.", Formatting.RED));
                                                     return 1;
                                                 }))))
-
-                        // /gm ship navstatus <encounterId> <shipId>
-                        // Shows full navigation + power + zone penalty state for any ship
                         .then(CommandManager.literal("navstatus")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .executes(ctx -> {
-                                                    String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                    String sid = StringArgumentType.getString(ctx, "shipId");
-                                                    es.getEncounter(eid)
-                                                            .flatMap(e -> e.getShip(sid))
-                                                            .ifPresentOrElse(ship -> {
-                                                                var hds = tacticalService.getHullDamageService();
-                                                                var destroyed = hds.getDestroyedZoneIds(ship.getShipId());
-                                                                String zones = destroyed.isEmpty()
-                                                                        ? "none"
-                                                                        : String.join(", ", destroyed);
+                                                    es.getEncounter(StringArgumentType.getString(ctx, "encounterId"))
+                                                            .flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId")))
+                                                            .ifPresentOrElse(s -> {
+                                                                var dz = tacticalService.getHullDamageService().getDestroyedZoneIds(s.getShipId());
                                                                 ctx.getSource().sendFeedback(() -> Text.literal(
-                                                                                "§b── " + ship.getRegistryName() + " Nav ──\n"
-                                                                                        + "§7Position:  §f" + String.format("%.1f, %.1f",
-                                                                                        ship.getPosX(), ship.getPosZ()) + "\n"
-                                                                                        + "§7Heading:   §f" + (int)ship.getHeading()
-                                                                                        + "° §8(target: " + (int)ship.getTargetHeading() + "°)\n"
-                                                                                        + "§7Speed:     §f" + String.format("%.2f", ship.getSpeed())
-                                                                                        + " §8(target: " + String.format("%.2f", ship.getTargetSpeed()) + ")\n"
-                                                                                        + "§7Warp:      §f" + ship.getWarpSpeed()
-                                                                                        + " §8(capable: " + ship.isWarpCapable() + ")\n"
-                                                                                        + "§7Power:     §f" + ship.getPowerBudget()
-                                                                                        + " §8Wpn:§c" + ship.getWeaponsPower()
-                                                                                        + " §8Shld:§b" + ship.getShieldsPower()
-                                                                                        + " §8Eng:§a" + ship.getEnginesPower()
-                                                                                        + " §8Sens:§e" + ship.getSensorsPower() + "\n"
-                                                                                        + "§7Torpedoes: §f" + ship.getTorpedoCount() + "\n"
-                                                                                        + "§7Destroyed zones: §c" + zones)
-                                                                        , false);
-                                                            }, () -> feedback(ctx.getSource(),
-                                                                    "Ship not found.", Formatting.RED));
+                                                                        "§b── " + s.getRegistryName() + " Nav ──\n"
+                                                                                + "§7Position: §f" + String.format("%.1f, %.1f", s.getPosX(), s.getPosZ()) + "\n"
+                                                                                + "§7Heading:  §f" + (int)s.getHeading() + "° §8(target: " + (int)s.getTargetHeading() + "°)\n"
+                                                                                + "§7Speed:    §f" + String.format("%.2f", s.getSpeed()) + " §8(target: " + String.format("%.2f", s.getTargetSpeed()) + ")\n"
+                                                                                + "§7Warp:     §f" + s.getWarpSpeed() + " §8(capable: " + s.isWarpCapable() + ")\n"
+                                                                                + "§7Power:    §f" + s.getPowerBudget() + " §8Wpn:§c" + s.getWeaponsPower() + " §8Shld:§b" + s.getShieldsPower() + " §8Eng:§a" + s.getEnginesPower() + " §8Sens:§e" + s.getSensorsPower() + "\n"
+                                                                                + "§7Torpedoes:§f" + s.getTorpedoCount() + "\n"
+                                                                                + "§7Destroyed zones: §c" + (dz.isEmpty() ? "none" : String.join(", ", dz))), false);
+                                                            }, () -> feedback(ctx.getSource(), "Ship not found.", Formatting.RED));
                                                     return 1;
                                                 }))))
-
-                        // /gm ship zonedamage <encounterId> <shipId> <zoneId>
-                        // Instantly destroys a zone for testing — bypasses HP, fires all penalties and block effects
                         .then(CommandManager.literal("zonedamage")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
-                                                .then(CommandManager.argument("zoneId", StringArgumentType.word())
-                                                        .suggests(SUGGEST_SHIP_ZONES)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                                .then(CommandManager.argument("zoneId", StringArgumentType.word()).suggests(SUGGEST_SHIP_ZONES)
                                                         .executes(ctx -> {
-                                                            String eid    = StringArgumentType.getString(ctx, "encounterId");
-                                                            String sid    = StringArgumentType.getString(ctx, "shipId");
-                                                            String zoneId = StringArgumentType.getString(ctx, "zoneId");
-
-                                                            var encounterOpt = es.getEncounter(eid);
-                                                            if (encounterOpt.isEmpty()) {
-                                                                feedback(ctx.getSource(), "Encounter not found.", Formatting.RED);
-                                                                return 0;
-                                                            }
-                                                            var shipOpt = encounterOpt.get().getShip(sid);
-                                                            if (shipOpt.isEmpty()) {
-                                                                feedback(ctx.getSource(), "Ship not found.", Formatting.RED);
-                                                                return 0;
-                                                            }
-
-                                                            var hds  = tacticalService.getHullDamageService();
-                                                            var zone = hds.getZone(sid, zoneId);
-                                                            if (zone.isEmpty()) {
-                                                                feedback(ctx.getSource(),
-                                                                        "Zone '" + zoneId + "' not found on ship. "
-                                                                                + "Is the ship in an active encounter?",
-                                                                        Formatting.RED);
-                                                                return 0;
-                                                            }
-
-                                                            // Force HP to 0 and trigger full destroy path
+                                                            var enc = es.getEncounter(StringArgumentType.getString(ctx, "encounterId"));
+                                                            if (enc.isEmpty()) { feedback(ctx.getSource(), "Encounter not found.", Formatting.RED); return 0; }
+                                                            var ship = enc.get().getShip(StringArgumentType.getString(ctx, "shipId"));
+                                                            if (ship.isEmpty()) { feedback(ctx.getSource(), "Ship not found.", Formatting.RED); return 0; }
+                                                            String zid = StringArgumentType.getString(ctx, "zoneId");
+                                                            var hds = tacticalService.getHullDamageService();
+                                                            var zone = hds.getZone(ship.get().getShipId(), zid);
+                                                            if (zone.isEmpty()) { feedback(ctx.getSource(), "Zone '" + zid + "' not found.", Formatting.RED); return 0; }
                                                             zone.get().applyDamage(zone.get().getMaxHp() + 1);
-                                                            // applyHullDamage won't fire because we're bypassing
-                                                            // the damage path — call the internal destroy directly
-                                                            // by draining hull to trigger zone check
-                                                            // Simpler: just invoke the penalty + block destruction manually
-                                                            hds.forceDestroyZone(
-                                                                    encounterOpt.get(),
-                                                                    shipOpt.get(),
-                                                                    zone.get(),
-                                                                    ctx.getSource().getServer());
-
-                                                            feedback(ctx.getSource(),
-                                                                    "Zone " + zoneId + " destroyed on "
-                                                                            + shipOpt.get().getRegistryName() + ".",
-                                                                    Formatting.RED);
+                                                            hds.forceDestroyZone(enc.get(), ship.get(), zone.get(), ctx.getSource().getServer());
+                                                            feedback(ctx.getSource(), "Zone " + zid + " destroyed on " + ship.get().getRegistryName() + ".", Formatting.RED);
                                                             return 1;
                                                         })))))
-
-                        // /gm ship zonerepair <encounterId> <shipId> <zoneId>
-                        // Instantly repairs a zone — clears penalties, restores blocks
                         .then(CommandManager.literal("zonerepair")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
-                                                .then(CommandManager.argument("zoneId", StringArgumentType.word())
-                                                        .suggests(SUGGEST_SHIP_ZONES)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                                .then(CommandManager.argument("zoneId", StringArgumentType.word()).suggests(SUGGEST_SHIP_ZONES)
                                                         .executes(ctx -> {
-                                                            String eid    = StringArgumentType.getString(ctx, "encounterId");
-                                                            String sid    = StringArgumentType.getString(ctx, "shipId");
-                                                            String zoneId = StringArgumentType.getString(ctx, "zoneId");
-
-                                                            var encounterOpt = es.getEncounter(eid);
-                                                            if (encounterOpt.isEmpty()) {
-                                                                feedback(ctx.getSource(), "Encounter not found.", Formatting.RED);
-                                                                return 0;
-                                                            }
-                                                            var shipOpt = encounterOpt.get().getShip(sid);
-                                                            if (shipOpt.isEmpty()) {
-                                                                feedback(ctx.getSource(), "Ship not found.", Formatting.RED);
-                                                                return 0;
-                                                            }
-
-                                                            tacticalService.getHullDamageService()
-                                                                    .repairZone(shipOpt.get(), zoneId);
-
-                                                            feedback(ctx.getSource(),
-                                                                    "Zone " + zoneId + " repaired on "
-                                                                            + shipOpt.get().getRegistryName() + ".",
-                                                                    Formatting.GREEN);
+                                                            var enc = es.getEncounter(StringArgumentType.getString(ctx, "encounterId"));
+                                                            if (enc.isEmpty()) { feedback(ctx.getSource(), "Encounter not found.", Formatting.RED); return 0; }
+                                                            var ship = enc.get().getShip(StringArgumentType.getString(ctx, "shipId"));
+                                                            if (ship.isEmpty()) { feedback(ctx.getSource(), "Ship not found.", Formatting.RED); return 0; }
+                                                            tacticalService.getHullDamageService().repairZone(ship.get(), StringArgumentType.getString(ctx, "zoneId"));
+                                                            feedback(ctx.getSource(), "Zone repaired on " + ship.get().getRegistryName() + ".", Formatting.GREEN);
                                                             return 1;
                                                         })))))
-
-                        // /gm ship zones <encounterId> <shipId>
-                        // Lists all zones with their HP and destroyed status
                         .then(CommandManager.literal("zones")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .executes(ctx -> {
-                                                    String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                    String sid = StringArgumentType.getString(ctx, "shipId");
-
-                                                    var encounterOpt = es.getEncounter(eid);
-                                                    if (encounterOpt.isEmpty()) {
-                                                        feedback(ctx.getSource(), "Encounter not found.", Formatting.RED);
-                                                        return 0;
-                                                    }
-                                                    var shipOpt = encounterOpt.get().getShip(sid);
-                                                    if (shipOpt.isEmpty()) {
-                                                        feedback(ctx.getSource(), "Ship not found.", Formatting.RED);
-                                                        return 0;
-                                                    }
-
-                                                    var hds   = tacticalService.getHullDamageService();
-                                                    var zones = hds.getZonesForShip(sid);
-                                                    if (zones.isEmpty()) {
-                                                        feedback(ctx.getSource(),
-                                                                "No zones initialised for " + sid + ".",
-                                                                Formatting.GRAY);
-                                                        return 0;
-                                                    }
-
-                                                    feedback(ctx.getSource(),
-                                                            "── Zones: " + shipOpt.get().getRegistryName() + " ──",
-                                                            Formatting.AQUA);
-                                                    zones.forEach((zoneId, zone) -> {
-                                                        String status = zone.isDestroyed() ? "§cDESTROYED"
-                                                                : zone.isDamaged() ? "§eDamaged"
-                                                                : "§aOK";
-                                                        feedback(ctx.getSource(),
-                                                                "  " + zoneId
-                                                                        + " | " + zone.getCurrentHp()
-                                                                        + "/" + zone.getMaxHp() + " HP"
-                                                                        + " | " + status
-                                                                        + " | " + zone.getRealShipBlocks().size()
-                                                                        + " real blocks, "
-                                                                        + zone.getModelBlocks().size() + " model blocks",
-                                                                Formatting.WHITE);
-                                                    });
+                                                    var enc = es.getEncounter(StringArgumentType.getString(ctx, "encounterId"));
+                                                    if (enc.isEmpty()) { feedback(ctx.getSource(), "Encounter not found.", Formatting.RED); return 0; }
+                                                    var ship = enc.get().getShip(StringArgumentType.getString(ctx, "shipId"));
+                                                    if (ship.isEmpty()) { feedback(ctx.getSource(), "Ship not found.", Formatting.RED); return 0; }
+                                                    var zones = tacticalService.getHullDamageService().getZonesForShip(ship.get().getShipId());
+                                                    if (zones.isEmpty()) { feedback(ctx.getSource(), "No zones initialised.", Formatting.GRAY); return 0; }
+                                                    feedback(ctx.getSource(), "── Zones: " + ship.get().getRegistryName() + " ──", Formatting.AQUA);
+                                                    zones.forEach((zid, z) -> feedback(ctx.getSource(),
+                                                            "  " + zid + " | " + z.getCurrentHp() + "/" + z.getMaxHp() + " | "
+                                                                    + (z.isDestroyed() ? "§cDESTROYED" : z.isDamaged() ? "§eDamaged" : "§aOK")
+                                                                    + " | " + z.getRealShipBlocks().size() + "R " + z.getModelBlocks().size() + "M", Formatting.WHITE));
                                                     return zones.size();
                                                 }))))
-
-                        // Power, heading, speed, torpedoes, warp, position, navstatus (home)
-                        // kept from original
-
                         .then(CommandManager.literal("power")
                                 .then(CommandManager.literal("home")
                                         .then(CommandManager.argument("amount", IntegerArgumentType.integer(0, 10000))
                                                 .executes(ctx -> {
-                                                    if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null
-                                                            || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) {
-                                                        feedback(ctx.getSource(), "No home ship registered.", Formatting.RED);
-                                                        return 0;
-                                                    }
-                                                    int amount = IntegerArgumentType.getInteger(ctx, "amount");
-                                                    var ship = SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
-                                                    ship.setManualPowerOverride(true);
-                                                    ship.setPowerOutput(amount);
-                                                    ship.setPowerBudget(amount);
-                                                    ship.setShieldsPower((int)(amount * 0.35));
-                                                    ship.setWeaponsPower((int)(amount * 0.30));
-                                                    ship.setEnginesPower((int)(amount * 0.25));
-                                                    ship.setSensorsPower(amount - ship.getShieldsPower()
-                                                            - ship.getWeaponsPower() - ship.getEnginesPower());
-                                                    feedback(ctx.getSource(),
-                                                            "Home ship power set to " + amount + ".",
-                                                            Formatting.GREEN);
-                                                    return 1;
+                                                    if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) { feedback(ctx.getSource(), "No home ship registered.", Formatting.RED); return 0; }
+                                                    int a = IntegerArgumentType.getInteger(ctx, "amount");
+                                                    var s = SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
+                                                    s.setManualPowerOverride(true); s.setPowerOutput(a); s.setPowerBudget(a);
+                                                    s.setShieldsPower((int)(a*0.35)); s.setWeaponsPower((int)(a*0.30)); s.setEnginesPower((int)(a*0.25));
+                                                    s.setSensorsPower(a - s.getShieldsPower() - s.getWeaponsPower() - s.getEnginesPower());
+                                                    feedback(ctx.getSource(), "Home ship power set to " + a + ".", Formatting.GREEN); return 1;
                                                 })))
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .then(CommandManager.argument("amount", IntegerArgumentType.integer(0, 10000))
                                                         .executes(ctx -> {
-                                                            String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                            String sid = StringArgumentType.getString(ctx, "shipId");
-                                                            int amount = IntegerArgumentType.getInteger(ctx, "amount");
-                                                            es.getEncounter(eid)
-                                                                    .flatMap(e -> e.getShip(sid))
-                                                                    .ifPresentOrElse(ship -> {
-                                                                        ship.setManualPowerOverride(true);
-                                                                        ship.setPowerOutput(amount);
-                                                                        ship.setPowerBudget(amount);
-                                                                        ship.setShieldsPower((int)(amount * 0.35));
-                                                                        ship.setWeaponsPower((int)(amount * 0.30));
-                                                                        ship.setEnginesPower((int)(amount * 0.25));
-                                                                        ship.setSensorsPower(amount - ship.getShieldsPower()
-                                                                                - ship.getWeaponsPower() - ship.getEnginesPower());
-                                                                        feedback(ctx.getSource(),
-                                                                                "Power set to " + amount + " on "
-                                                                                        + ship.getRegistryName()
-                                                                                        + ". Shields=" + ship.getShieldsPower()
-                                                                                        + " Wpn=" + ship.getWeaponsPower()
-                                                                                        + " Eng=" + ship.getEnginesPower(),
-                                                                                Formatting.GREEN);
-                                                                    }, () -> feedback(ctx.getSource(),
-                                                                            "Ship not found.", Formatting.RED));
+                                                            int a = IntegerArgumentType.getInteger(ctx, "amount");
+                                                            es.getEncounter(StringArgumentType.getString(ctx, "encounterId")).flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId"))).ifPresentOrElse(s -> {
+                                                                s.setManualPowerOverride(true); s.setPowerOutput(a); s.setPowerBudget(a);
+                                                                s.setShieldsPower((int)(a*0.35)); s.setWeaponsPower((int)(a*0.30)); s.setEnginesPower((int)(a*0.25));
+                                                                s.setSensorsPower(a - s.getShieldsPower() - s.getWeaponsPower() - s.getEnginesPower());
+                                                                feedback(ctx.getSource(), "Power set to " + a + " on " + s.getRegistryName() + ".", Formatting.GREEN);
+                                                            }, () -> feedback(ctx.getSource(), "Ship not found.", Formatting.RED));
                                                             return 1;
                                                         })))))
-
                         .then(CommandManager.literal("heading")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .then(CommandManager.argument("degrees", FloatArgumentType.floatArg(0f, 359f))
                                                         .executes(ctx -> {
-                                                            String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                            String sid = StringArgumentType.getString(ctx, "shipId");
-                                                            float deg  = FloatArgumentType.getFloat(ctx, "degrees");
-                                                            es.getEncounter(eid)
-                                                                    .flatMap(e -> e.getShip(sid))
-                                                                    .ifPresentOrElse(ship -> {
-                                                                        ship.setTargetHeading(deg);
-                                                                        feedback(ctx.getSource(),
-                                                                                ship.getRegistryName() + " heading → " + deg + "°",
-                                                                                Formatting.GREEN);
-                                                                    }, () -> feedback(ctx.getSource(),
-                                                                            "Ship not found.", Formatting.RED));
+                                                            es.getEncounter(StringArgumentType.getString(ctx, "encounterId")).flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId"))).ifPresentOrElse(s -> { s.setTargetHeading(FloatArgumentType.getFloat(ctx, "degrees")); feedback(ctx.getSource(), s.getRegistryName() + " heading → " + FloatArgumentType.getFloat(ctx, "degrees") + "°", Formatting.GREEN); }, () -> feedback(ctx.getSource(), "Ship not found.", Formatting.RED));
                                                             return 1;
                                                         })))))
-
                         .then(CommandManager.literal("speed")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .then(CommandManager.argument("value", FloatArgumentType.floatArg(0f, 10f))
                                                         .executes(ctx -> {
-                                                            String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                            String sid = StringArgumentType.getString(ctx, "shipId");
-                                                            float spd  = FloatArgumentType.getFloat(ctx, "value");
-                                                            es.getEncounter(eid)
-                                                                    .flatMap(e -> e.getShip(sid))
-                                                                    .ifPresentOrElse(ship -> {
-                                                                        ship.setTargetSpeed(spd);
-                                                                        feedback(ctx.getSource(),
-                                                                                ship.getRegistryName() + " speed → " + spd,
-                                                                                Formatting.GREEN);
-                                                                    }, () -> feedback(ctx.getSource(),
-                                                                            "Ship not found.", Formatting.RED));
+                                                            es.getEncounter(StringArgumentType.getString(ctx, "encounterId")).flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId"))).ifPresentOrElse(s -> { s.setTargetSpeed(FloatArgumentType.getFloat(ctx, "value")); feedback(ctx.getSource(), s.getRegistryName() + " speed → " + FloatArgumentType.getFloat(ctx, "value"), Formatting.GREEN); }, () -> feedback(ctx.getSource(), "Ship not found.", Formatting.RED));
                                                             return 1;
                                                         })))))
-
                         .then(CommandManager.literal("torpedoes")
-                                .then(CommandManager.argument("encounterId", StringArgumentType.word())
-                                        .suggests(SUGGEST_ENCOUNTERS)
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ENCOUNTER_SHIPS)
+                                .then(CommandManager.argument("encounterId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTERS)
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_ENCOUNTER_SHIPS)
                                                 .then(CommandManager.argument("count", IntegerArgumentType.integer(0, 100))
                                                         .executes(ctx -> {
-                                                            String eid = StringArgumentType.getString(ctx, "encounterId");
-                                                            String sid = StringArgumentType.getString(ctx, "shipId");
-                                                            int count  = IntegerArgumentType.getInteger(ctx, "count");
-                                                            es.getEncounter(eid)
-                                                                    .flatMap(e -> e.getShip(sid))
-                                                                    .ifPresentOrElse(ship -> {
-                                                                        ship.setTorpedoCount(count);
-                                                                        feedback(ctx.getSource(),
-                                                                                ship.getRegistryName() + " torpedoes → " + count,
-                                                                                Formatting.GREEN);
-                                                                    }, () -> feedback(ctx.getSource(),
-                                                                            "Ship not found.", Formatting.RED));
+                                                            es.getEncounter(StringArgumentType.getString(ctx, "encounterId")).flatMap(e -> e.getShip(StringArgumentType.getString(ctx, "shipId"))).ifPresentOrElse(s -> { s.setTorpedoCount(IntegerArgumentType.getInteger(ctx, "count")); feedback(ctx.getSource(), s.getRegistryName() + " torpedoes → " + IntegerArgumentType.getInteger(ctx, "count"), Formatting.GREEN); }, () -> feedback(ctx.getSource(), "Ship not found.", Formatting.RED));
                                                             return 1;
                                                         })))))
-
                         .then(CommandManager.literal("warp")
                                 .then(CommandManager.argument("factor", IntegerArgumentType.integer(0, 9))
                                         .executes(ctx -> {
-                                            if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null
-                                                    || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) {
-                                                feedback(ctx.getSource(), "No home ship registered.", Formatting.RED);
-                                                return 0;
-                                            }
-                                            int factor = IntegerArgumentType.getInteger(ctx, "factor");
-                                            SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.applyWarpSpeed(factor);
-                                            feedback(ctx.getSource(),
-                                                    factor == 0
-                                                            ? "Home ship dropped to sublight."
-                                                            : "Home ship warp speed set to warp " + factor + ".",
-                                                    Formatting.GREEN);
-                                            return 1;
+                                            if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) { feedback(ctx.getSource(), "No home ship registered.", Formatting.RED); return 0; }
+                                            int f = IntegerArgumentType.getInteger(ctx, "factor");
+                                            SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.applyWarpSpeed(f);
+                                            feedback(ctx.getSource(), f == 0 ? "Home ship dropped to sublight." : "Home ship warp speed set to warp " + f + ".", Formatting.GREEN); return 1;
                                         })))
-
                         .then(CommandManager.literal("position")
                                 .then(CommandManager.literal("set")
                                         .then(CommandManager.argument("x", DoubleArgumentType.doubleArg())
                                                 .then(CommandManager.argument("z", DoubleArgumentType.doubleArg())
                                                         .executes(ctx -> {
-                                                            if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null
-                                                                    || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) {
-                                                                feedback(ctx.getSource(), "No home ship registered.", Formatting.RED);
-                                                                return 0;
-                                                            }
-                                                            double x = DoubleArgumentType.getDouble(ctx, "x");
-                                                            double z = DoubleArgumentType.getDouble(ctx, "z");
-                                                            var ship = SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
-                                                            ship.setPosX(x);
-                                                            ship.setPosZ(z);
-                                                            ship.setTargetHeading(ship.getHeading());
-                                                            ship.setTargetSpeed(0);
+                                                            if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) { feedback(ctx.getSource(), "No home ship registered.", Formatting.RED); return 0; }
+                                                            double x = DoubleArgumentType.getDouble(ctx, "x"), z = DoubleArgumentType.getDouble(ctx, "z");
+                                                            var s = SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
+                                                            s.setPosX(x); s.setPosZ(z); s.setTargetHeading(s.getHeading()); s.setTargetSpeed(0);
                                                             SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.savePosition();
-                                                            feedback(ctx.getSource(),
-                                                                    String.format("Home ship position set to (%.1f, %.1f).", x, z),
-                                                                    Formatting.GREEN);
-                                                            return 1;
+                                                            feedback(ctx.getSource(), String.format("Home ship position set to (%.1f, %.1f).", x, z), Formatting.GREEN); return 1;
                                                         })))))
-
-                        // Home ship navstatus — kept for passive navigation context
                         .then(CommandManager.literal("homenavstatus")
                                 .executes(ctx -> {
-                                    if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null
-                                            || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) {
-                                        feedback(ctx.getSource(), "No home ship registered.", Formatting.RED);
-                                        return 0;
-                                    }
-                                    var ship = SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
+                                    if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE == null || !SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.hasHomeShip()) { feedback(ctx.getSource(), "No home ship registered.", Formatting.RED); return 0; }
+                                    var s = SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.getHomeShipState();
                                     ctx.getSource().sendFeedback(() -> Text.literal(
-                                                    "§b── Home Ship Navigation ──\n"
-                                                            + "§7Position: §f" + String.format("%.1f, %.1f",
-                                                            ship.getPosX(), ship.getPosZ()) + "\n"
-                                                            + "§7Heading:  §f" + (int)ship.getHeading()
-                                                            + "° §8(target: " + (int)ship.getTargetHeading() + "°)\n"
-                                                            + "§7Speed:    §f" + String.format("%.1f", ship.getSpeed())
-                                                            + " §8(target: " + String.format("%.1f", ship.getTargetSpeed()) + ")\n"
-                                                            + "§7Warp:     §f" + ship.getWarpSpeed()
-                                                            + " §8(capable: " + ship.isWarpCapable() + ")")
-                                            , false);
+                                            "§b── Home Ship Navigation ──\n§7Position: §f" + String.format("%.1f, %.1f", s.getPosX(), s.getPosZ())
+                                                    + "\n§7Heading:  §f" + (int)s.getHeading() + "° §8(target: " + (int)s.getTargetHeading() + "°)"
+                                                    + "\n§7Speed:    §f" + String.format("%.1f", s.getSpeed()) + " §8(target: " + String.format("%.1f", s.getTargetSpeed()) + ")"
+                                                    + "\n§7Warp:     §f" + s.getWarpSpeed() + " §8(capable: " + s.isWarpCapable() + ")"), false);
                                     return 1;
                                 }))
-                )
-        );
+                ) // end /gm ship
+        ); // end dispatcher.register(/gm)
 
-        // ── /admin ship + hardpoint + shipyard ────────────────────────────────
+        // ═════════════════════════════════════════════════════════════════════
+        // /tactical
+        // ═════════════════════════════════════════════════════════════════════
+        dispatcher.register(CommandManager.literal("tactical")
+                .requires(src -> src.hasPermissionLevel(2))
+                .then(CommandManager.literal("zones")
+                        .then(CommandManager.literal("clear")
+                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                        .executes(ctx -> {
+                                            if (SecondDawnRP.TACTICAL_SERVICE == null) { feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED); return 0; }
+                                            String sid = StringArgumentType.getString(ctx, "shipId");
+                                            int n = SecondDawnRP.TACTICAL_SERVICE.clearAllZonesForShip(sid);
+                                            feedback(ctx.getSource(), "Cleared " + n + " zone block registration(s) for ship '" + sid + "'.", Formatting.YELLOW);
+                                            return n;
+                                        })))
+                        .then(CommandManager.literal("list")
+                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                        .executes(ctx -> {
+                                            if (SecondDawnRP.TACTICAL_SERVICE == null) { feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED); return 0; }
+                                            String sid = StringArgumentType.getString(ctx, "shipId");
+                                            var counts = SecondDawnRP.TACTICAL_SERVICE.listZonesForShip(sid);
+                                            if (counts.isEmpty()) { feedback(ctx.getSource(), "No zone blocks registered for ship '" + sid + "'.", Formatting.GRAY); return 0; }
+                                            feedback(ctx.getSource(), "── Zone blocks for " + sid + " ──", Formatting.AQUA);
+                                            counts.forEach((zid, c) -> feedback(ctx.getSource(), "  " + zid + " | model: " + c[0] + " | real: " + c[1], Formatting.WHITE));
+                                            return counts.size();
+                                        }))))
+        ); // end dispatcher.register(/tactical)
 
+        // ═════════════════════════════════════════════════════════════════════
+        // /admin
+        // ═════════════════════════════════════════════════════════════════════
         dispatcher.register(CommandManager.literal("admin")
                 .requires(src -> src.hasPermissionLevel(4))
 
+                // /admin shipyard set
                 .then(CommandManager.literal("shipyard")
                         .then(CommandManager.literal("set")
                                 .executes(ctx -> {
-                                    ServerPlayerEntity player = ctx.getSource().getPlayer();
-                                    if (player == null) return 0;
-                                    String worldKey = player.getWorld().getRegistryKey().getValue().toString();
-                                    es.setShipyard(worldKey, player.getX(), player.getY(), player.getZ());
-                                    feedback(ctx.getSource(),
-                                            "Shipyard spawn set at current position.", Formatting.GREEN);
+                                    ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                    if (p == null) return 0;
+                                    es.setShipyard(p.getWorld().getRegistryKey().getValue().toString(), p.getX(), p.getY(), p.getZ());
+                                    feedback(ctx.getSource(), "Shipyard spawn set at current position.", Formatting.GREEN);
                                     return 1;
                                 })))
 
+                // /admin ship ...
                 .then(CommandManager.literal("ship")
-
                         .then(CommandManager.literal("register")
                                 .then(CommandManager.argument("shipId", StringArgumentType.word())
                                         .then(CommandManager.argument("name", StringArgumentType.string())
-                                                .then(CommandManager.argument("class", StringArgumentType.word())
-                                                        .suggests(SUGGEST_CLASSES)
-                                                        .then(CommandManager.argument("faction", StringArgumentType.word())
-                                                                .suggests(SUGGEST_FACTIONS)
+                                                .then(CommandManager.argument("class", StringArgumentType.word()).suggests(SUGGEST_CLASSES)
+                                                        .then(CommandManager.argument("faction", StringArgumentType.word()).suggests(SUGGEST_FACTIONS)
                                                                 .executes(ctx -> {
-                                                                    String result = es.registerShip(
+                                                                    feedback(ctx.getSource(), es.registerShip(
                                                                             StringArgumentType.getString(ctx, "shipId"),
                                                                             StringArgumentType.getString(ctx, "name"),
                                                                             StringArgumentType.getString(ctx, "class"),
-                                                                            StringArgumentType.getString(ctx, "faction"));
-                                                                    feedback(ctx.getSource(), result, Formatting.GREEN);
+                                                                            StringArgumentType.getString(ctx, "faction")), Formatting.GREEN);
                                                                     return 1;
                                                                 }))))))
-
                         .then(CommandManager.literal("unregister")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
-                                        .executes(ctx -> {
-                                            String result = es.unregisterShip(
-                                                    StringArgumentType.getString(ctx, "shipId"));
-                                            feedback(ctx.getSource(), result, Formatting.YELLOW);
-                                            return 1;
-                                        })))
-
+                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                        .executes(ctx -> { feedback(ctx.getSource(), es.unregisterShip(StringArgumentType.getString(ctx, "shipId")), Formatting.YELLOW); return 1; })))
                         .then(CommandManager.literal("list")
                                 .executes(ctx -> {
-                                    var registry = es.getShipRegistry();
-                                    if (registry.isEmpty()) {
-                                        feedback(ctx.getSource(), "No ships registered.", Formatting.GRAY);
-                                        return 0;
-                                    }
+                                    var reg = es.getShipRegistry();
+                                    if (reg.isEmpty()) { feedback(ctx.getSource(), "No ships registered.", Formatting.GRAY); return 0; }
                                     feedback(ctx.getSource(), "── Ship Registry ──", Formatting.AQUA);
-                                    registry.values().forEach(e -> feedback(ctx.getSource(),
-                                            "  " + e.getShipId()
-                                                    + " | " + e.getRegistryName()
-                                                    + " | " + e.getShipClass()
-                                                    + " | " + e.getFaction()
-                                                    + (e.isHomeShip() ? " §b[HOME]" : ""),
+                                    reg.values().forEach(e -> feedback(ctx.getSource(),
+                                            "  " + e.getShipId() + " | " + e.getRegistryName() + " | " + e.getShipClass() + " | " + e.getFaction()
+                                                    + (e.isHomeShip() ? " §b[HOME]" : "") + (e.hasBounds() ? " §7[bounds set]" : " §8[no bounds]"),
                                             Formatting.WHITE));
-                                    return registry.size();
+                                    return reg.size();
                                 }))
-
                         .then(CommandManager.literal("sethomeship")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
+                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
                                         .executes(ctx -> {
-                                            String shipId  = StringArgumentType.getString(ctx, "shipId");
-                                            var registry   = es.getShipRegistry();
-                                            if (!registry.containsKey(shipId)) {
-                                                feedback(ctx.getSource(), "Unknown ship: " + shipId, Formatting.RED);
-                                                return 0;
-                                            }
-                                            registry.values().forEach(e -> e.setHomeShip(false));
-                                            ShipRegistryEntry homeEntry = registry.get(shipId);
-                                            homeEntry.setHomeShip(true);
-                                            registry.values().forEach(e -> es.saveShipRegistryEntry(e));
-                                            if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE != null) {
-                                                SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.loadHomeShip();
-                                            }
-                                            feedback(ctx.getSource(),
-                                                    "Home ship set to: " + homeEntry.getRegistryName()
-                                                            + ". Passive movement active.",
-                                                    Formatting.GREEN);
+                                            String sid = StringArgumentType.getString(ctx, "shipId");
+                                            var reg = es.getShipRegistry();
+                                            if (!reg.containsKey(sid)) { feedback(ctx.getSource(), "Unknown ship: " + sid, Formatting.RED); return 0; }
+                                            reg.values().forEach(e -> e.setHomeShip(false));
+                                            reg.get(sid).setHomeShip(true);
+                                            reg.values().forEach(es::saveShipRegistryEntry);
+                                            if (SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE != null) SecondDawnRP.PASSIVE_SHIP_MOVEMENT_SERVICE.loadHomeShip();
+                                            feedback(ctx.getSource(), "Home ship set to: " + reg.get(sid).getRegistryName() + ".", Formatting.GREEN);
                                             return 1;
-                                        }))))
-
-                .then(CommandManager.literal("hardpoint")
-
-                        .then(CommandManager.literal("register")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
-                                        .then(CommandManager.argument("arc", StringArgumentType.word())
-                                                .suggests(SUGGEST_ARCS)
-                                                .then(CommandManager.argument("type", StringArgumentType.word())
-                                                        .suggests(SUGGEST_WEAPON_TYPES)
-                                                        .executes(ctx -> {
-                                                            ServerPlayerEntity player = ctx.getSource().getPlayer();
-                                                            if (player == null) return 0;
-                                                            BlockPos pos   = player.getBlockPos();
-                                                            String shipId  = StringArgumentType.getString(ctx, "shipId");
-                                                            String arcStr  = StringArgumentType.getString(ctx, "arc").toUpperCase();
-                                                            String typeStr = StringArgumentType.getString(ctx, "type").toUpperCase();
-                                                            try {
-                                                                HardpointEntry.Arc arc       = HardpointEntry.Arc.valueOf(arcStr);
-                                                                HardpointEntry.WeaponType wt = HardpointEntry.WeaponType.valueOf(typeStr);
-                                                                String result = es.registerHardpoint(shipId, pos, arc, wt);
-                                                                feedback(ctx.getSource(), result, Formatting.GREEN);
-                                                            } catch (IllegalArgumentException e) {
-                                                                feedback(ctx.getSource(),
-                                                                        "Invalid arc or type. Arc: FORE/AFT/PORT/STARBOARD  Type: PHASER_ARRAY/TORPEDO_TUBE",
-                                                                        Formatting.RED);
-                                                            }
-                                                            return 1;
-                                                        })))))
-
-                        .then(CommandManager.literal("list")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
-                                        .executes(ctx -> {
-                                            String shipId = StringArgumentType.getString(ctx, "shipId");
-                                            var hps = es.getHardpoints(shipId);
-                                            if (hps.isEmpty()) {
-                                                feedback(ctx.getSource(),
-                                                        "No hardpoints on " + shipId, Formatting.GRAY);
-                                                return 0;
-                                            }
-                                            feedback(ctx.getSource(),
-                                                    "── Hardpoints on " + shipId + " ──", Formatting.AQUA);
-                                            hps.forEach(h -> feedback(ctx.getSource(),
-                                                    "  " + h.getHardpointId()
-                                                            + " | " + h.getWeaponType()
-                                                            + " | " + h.getArc()
-                                                            + " | HP: " + h.getHealth(),
-                                                    Formatting.WHITE));
-                                            return hps.size();
                                         })))
 
-                        .then(CommandManager.literal("zone")
+                        // /admin ship bounds settarget|show|set
+                        .then(CommandManager.literal("bounds")
+                                .then(CommandManager.literal("settarget")
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                .executes(ctx -> {
+                                                    ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                                    if (p == null) { feedback(ctx.getSource(), "Only players can use this.", Formatting.RED); return 0; }
+                                                    String sid = StringArgumentType.getString(ctx, "shipId");
+                                                    if (!SecondDawnRP.ENCOUNTER_SERVICE.getShipRegistry().containsKey(sid)) { feedback(ctx.getSource(), "Ship '" + sid + "' not found.", Formatting.RED); return 0; }
+                                                    net.shard.seconddawnrp.tactical.item.ShipBoundsToolItem.setTarget(p, sid);
+                                                    return 1;
+                                                })))
+                                .then(CommandManager.literal("show")
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                .executes(ctx -> {
+                                                    ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                                    if (p == null) return 0;
+                                                    String sid = StringArgumentType.getString(ctx, "shipId");
+                                                    var entry = SecondDawnRP.ENCOUNTER_SERVICE.getShipEntry(sid);
+                                                    if (entry.isEmpty()) { feedback(ctx.getSource(), "Ship '" + sid + "' not found.", Formatting.RED); return 0; }
+                                                    if (!entry.get().hasBounds()) { feedback(ctx.getSource(), "Ship '" + sid + "' has no bounds set.", Formatting.GRAY); return 0; }
+                                                    BlockPos mn = entry.get().getRealBoundsMin(), mx = entry.get().getRealBoundsMax();
+                                                    feedback(ctx.getSource(), "Bounds for '" + sid + "':\n  Min: " + mn.getX() + ", " + mn.getY() + ", " + mn.getZ() + "\n  Max: " + mx.getX() + ", " + mx.getY() + ", " + mx.getZ(), Formatting.AQUA);
+                                                    net.minecraft.util.math.Box box = entry.get().getRealBoundsBox();
+                                                    if (box != null && p.getWorld() instanceof net.minecraft.server.world.ServerWorld sw)
+                                                        net.shard.seconddawnrp.tactical.item.ShipBoundsToolItem.drawParticleBoxPublic(sw, box, p);
+                                                    return 1;
+                                                })))
                                 .then(CommandManager.literal("set")
-                                        .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                                .suggests(SUGGEST_REGISTRY_SHIPS)
-                                                .then(CommandManager.argument("zoneId", StringArgumentType.word())
-                                                        .suggests(SUGGEST_ZONE_IDS)
-                                                        .then(CommandManager.argument("mode", StringArgumentType.word())
-                                                                .suggests((ctx, builder) -> {
-                                                                    builder.suggest("MODEL");
-                                                                    builder.suggest("REAL");
-                                                                    return builder.buildFuture();
-                                                                })
-                                                                .executes(ctx -> {
-                                                                    ServerPlayerEntity player = ctx.getSource().getPlayer();
-                                                                    if (player == null) return 0;
-                                                                    String shipId = StringArgumentType.getString(ctx, "shipId");
-                                                                    String zoneId = StringArgumentType.getString(ctx, "zoneId");
-                                                                    String mode   = StringArgumentType.getString(ctx, "mode").toUpperCase();
-                                                                    if (!mode.equals("MODEL") && !mode.equals("REAL")) {
-                                                                        feedback(ctx.getSource(),
-                                                                                "Mode must be MODEL or REAL.", Formatting.RED);
-                                                                        return 0;
-                                                                    }
-                                                                    net.shard.seconddawnrp.tactical.damage
-                                                                            .DamageZoneToolItem.setContext(
-                                                                                    player, shipId, zoneId, mode);
-                                                                    return 1;
-                                                                }))))))
+                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                .then(CommandManager.argument("x1", IntegerArgumentType.integer())
+                                                        .then(CommandManager.argument("y1", IntegerArgumentType.integer())
+                                                                .then(CommandManager.argument("z1", IntegerArgumentType.integer())
+                                                                        .then(CommandManager.argument("x2", IntegerArgumentType.integer())
+                                                                                .then(CommandManager.argument("y2", IntegerArgumentType.integer())
+                                                                                        .then(CommandManager.argument("z2", IntegerArgumentType.integer())
+                                                                                                .executes(ctx -> {
+                                                                                                    if (SecondDawnRP.TACTICAL_SERVICE == null) { feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED); return 0; }
+                                                                                                    String sid = StringArgumentType.getString(ctx, "shipId");
+                                                                                                    BlockPos c1 = new BlockPos(IntegerArgumentType.getInteger(ctx, "x1"), IntegerArgumentType.getInteger(ctx, "y1"), IntegerArgumentType.getInteger(ctx, "z1"));
+                                                                                                    BlockPos c2 = new BlockPos(IntegerArgumentType.getInteger(ctx, "x2"), IntegerArgumentType.getInteger(ctx, "y2"), IntegerArgumentType.getInteger(ctx, "z2"));
+                                                                                                    if (!SecondDawnRP.TACTICAL_SERVICE.setShipBounds(sid, c1, c2)) { feedback(ctx.getSource(), "Ship '" + sid + "' not found.", Formatting.RED); return 0; }
+                                                                                                    feedback(ctx.getSource(), "Bounds set for '" + sid + "': " + (Math.abs(c2.getX()-c1.getX())+1) + "×" + (Math.abs(c2.getY()-c1.getY())+1) + "×" + (Math.abs(c2.getZ()-c1.getZ())+1) + " blocks.", Formatting.GREEN);
+                                                                                                    return 1;
+                                                                                                })))))))
+                                        ) // end /admin ship bounds+sethomeship+list+unregister+register chain
+                                ) // end /admin ship
 
-
-                        .then(CommandManager.literal("clear")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
-                                        .then(CommandManager.argument("zoneId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ZONE_IDS)
-                                                .then(CommandManager.argument("target", StringArgumentType.word())
-                                                        .suggests((ctx, builder) -> {
-                                                            builder.suggest("MODEL");
-                                                            builder.suggest("REAL");
-                                                            builder.suggest("ALL");
-                                                            return builder.buildFuture();
-                                                        })
+                                // /admin hardpoint ...
+                                .then(CommandManager.literal("hardpoint")
+                                        .then(CommandManager.literal("register")
+                                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                        .then(CommandManager.argument("arc", StringArgumentType.word()).suggests(SUGGEST_ARCS)
+                                                                .then(CommandManager.argument("type", StringArgumentType.word()).suggests(SUGGEST_WEAPON_TYPES)
+                                                                        .executes(ctx -> {
+                                                                            ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                                                            if (p == null) return 0;
+                                                                            try {
+                                                                                feedback(ctx.getSource(), es.registerHardpoint(
+                                                                                        StringArgumentType.getString(ctx, "shipId"), p.getBlockPos(),
+                                                                                        HardpointEntry.Arc.valueOf(StringArgumentType.getString(ctx, "arc").toUpperCase()),
+                                                                                        HardpointEntry.WeaponType.valueOf(StringArgumentType.getString(ctx, "type").toUpperCase())), Formatting.GREEN);
+                                                                            } catch (IllegalArgumentException e) { feedback(ctx.getSource(), "Invalid arc or type.", Formatting.RED); }
+                                                                            return 1;
+                                                                        })))))
+                                        .then(CommandManager.literal("list")
+                                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
                                                         .executes(ctx -> {
-                                                            String shipId = StringArgumentType.getString(ctx, "shipId");
-                                                            String zoneId = StringArgumentType.getString(ctx, "zoneId");
-                                                            String target = StringArgumentType.getString(ctx, "target").toUpperCase();
+                                                            String sid = StringArgumentType.getString(ctx, "shipId");
+                                                            var hps = es.getHardpoints(sid);
+                                                            if (hps.isEmpty()) { feedback(ctx.getSource(), "No hardpoints on " + sid, Formatting.GRAY); return 0; }
+                                                            feedback(ctx.getSource(), "── Hardpoints on " + sid + " ──", Formatting.AQUA);
+                                                            hps.forEach(h -> feedback(ctx.getSource(), "  " + h.getHardpointId() + " | " + h.getWeaponType() + " | " + h.getArc() + " | HP: " + h.getHealth(), Formatting.WHITE));
+                                                            return hps.size();
+                                                        })))
+                                        .then(CommandManager.literal("zone")
+                                                .then(CommandManager.literal("set")
+                                                        .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                                .then(CommandManager.argument("zoneId", StringArgumentType.word()).suggests(SUGGEST_ZONE_IDS)
+                                                                        .then(CommandManager.argument("mode", StringArgumentType.word())
+                                                                                .suggests((ctx, b) -> { b.suggest("MODEL"); b.suggest("REAL"); return b.buildFuture(); })
+                                                                                .executes(ctx -> {
+                                                                                    ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                                                                    if (p == null) return 0;
+                                                                                    String mode = StringArgumentType.getString(ctx, "mode").toUpperCase();
+                                                                                    if (!mode.equals("MODEL") && !mode.equals("REAL")) { feedback(ctx.getSource(), "Mode must be MODEL or REAL.", Formatting.RED); return 0; }
+                                                                                    net.shard.seconddawnrp.tactical.damage.DamageZoneToolItem.setContext(p, StringArgumentType.getString(ctx, "shipId"), StringArgumentType.getString(ctx, "zoneId"), mode);
+                                                                                    return 1;
+                                                                                }))))))
+                                        .then(CommandManager.literal("clear")
+                                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                        .then(CommandManager.argument("zoneId", StringArgumentType.word()).suggests(SUGGEST_ZONE_IDS)
+                                                                .then(CommandManager.argument("target", StringArgumentType.word())
+                                                                        .suggests((ctx, b) -> { b.suggest("MODEL"); b.suggest("REAL"); b.suggest("ALL"); return b.buildFuture(); })
+                                                                        .executes(ctx -> {
+                                                                            if (SecondDawnRP.TACTICAL_SERVICE == null) { feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED); return 0; }
+                                                                            String sid = StringArgumentType.getString(ctx, "shipId");
+                                                                            String zid = StringArgumentType.getString(ctx, "zoneId");
+                                                                            String tgt = StringArgumentType.getString(ctx, "target").toUpperCase();
+                                                                            var zoneOpt = SecondDawnRP.TACTICAL_SERVICE.getHullDamageService().getZone(sid, zid);
+                                                                            if (zoneOpt.isEmpty()) { feedback(ctx.getSource(), "Zone '" + zid + "' not found on ship '" + sid + "'.", Formatting.RED); return 0; }
+                                                                            var zone = zoneOpt.get();
+                                                                            int cleared = 0;
+                                                                            if ("MODEL".equals(tgt) || "ALL".equals(tgt)) { cleared += zone.getModelBlocks().size(); zone.clearModelBlocks(); }
+                                                                            if ("REAL".equals(tgt) || "ALL".equals(tgt)) { cleared += zone.getRealShipBlocks().size(); zone.clearRealShipBlocks(); }
+                                                                            feedback(ctx.getSource(), "Cleared " + cleared + " block(s) from " + tgt + " on zone " + zid + ".", Formatting.YELLOW);
+                                                                            return cleared;
+                                                                        })))))
+                                        .then(CommandManager.literal("remove")
+                                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                        .then(CommandManager.argument("zoneId", StringArgumentType.word()).suggests(SUGGEST_ZONE_IDS)
+                                                                .executes(ctx -> {
+                                                                    if (SecondDawnRP.TACTICAL_SERVICE == null) { feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED); return 0; }
+                                                                    boolean ok = SecondDawnRP.TACTICAL_SERVICE.getHullDamageService().removeZone(StringArgumentType.getString(ctx, "shipId"), StringArgumentType.getString(ctx, "zoneId"));
+                                                                    feedback(ctx.getSource(), ok ? "Zone removed." : "Zone not found.", ok ? Formatting.YELLOW : Formatting.RED);
+                                                                    return ok ? 1 : 0;
+                                                                }))))
+                                        .then(CommandManager.literal("locate")
+                                                .then(CommandManager.argument("shipId", StringArgumentType.word()).suggests(SUGGEST_REGISTRY_SHIPS)
+                                                        .then(CommandManager.argument("zoneId", StringArgumentType.word()).suggests(SUGGEST_ZONE_IDS)
+                                                                .executes(ctx -> {
+                                                                    ServerPlayerEntity p = ctx.getSource().getPlayer();
+                                                                    if (p == null || SecondDawnRP.TACTICAL_SERVICE == null) return 0;
+                                                                    String sid = StringArgumentType.getString(ctx, "shipId");
+                                                                    String zid = StringArgumentType.getString(ctx, "zoneId");
+                                                                    var zoneOpt = SecondDawnRP.TACTICAL_SERVICE.getHullDamageService().getZone(sid, zid);
+                                                                    if (zoneOpt.isEmpty()) { feedback(ctx.getSource(), "Zone '" + zid + "' not found on ship '" + sid + "'.", Formatting.RED); return 0; }
+                                                                    var zone = zoneOpt.get();
+                                                                    int count = 0;
+                                                                    for (BlockPos pos : zone.getModelBlocks()) { net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, new net.shard.seconddawnrp.tactical.network.LocateZoneBlockS2CPacket(zid, "MODEL", pos.getX()+0.5, pos.getY()+0.5, pos.getZ()+0.5)); count++; }
+                                                                    for (BlockPos pos : zone.getRealShipBlocks()) { net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, new net.shard.seconddawnrp.tactical.network.LocateZoneBlockS2CPacket(zid, "REAL", pos.getX()+0.5, pos.getY()+0.5, pos.getZ()+0.5)); count++; }
+                                                                    feedback(ctx.getSource(), "Located " + count + " block(s) for zone " + zid + ".", Formatting.AQUA);
+                                                                    return count;
+                                                                }))))))
+                ) // end /admin hardpoint
+        ); // end dispatcher.register(/admin)
 
-                                                            if (SecondDawnRP.TACTICAL_SERVICE == null) {
-                                                                feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED);
-                                                                return 0;
-                                                            }
-
-                                                            var zoneOpt = SecondDawnRP.TACTICAL_SERVICE
-                                                                    .getHullDamageService().getZone(shipId, zoneId);
-                                                            if (zoneOpt.isEmpty()) {
-                                                                feedback(ctx.getSource(),
-                                                                        "Zone '" + zoneId + "' not found on ship '" + shipId + "'.",
-                                                                        Formatting.RED);
-                                                                return 0;
-                                                            }
-
-                                                            net.shard.seconddawnrp.tactical.data.DamageZone zone = zoneOpt.get();
-                                                            int cleared = 0;
-
-                                                            if ("MODEL".equals(target) || "ALL".equals(target)) {
-                                                                cleared += zone.getModelBlocks().size();
-                                                                zone.clearModelBlocks();
-                                                            }
-                                                            if ("REAL".equals(target) || "ALL".equals(target)) {
-                                                                cleared += zone.getRealShipBlocks().size();
-                                                                zone.clearRealShipBlocks();
-                                                            }
-
-                                                            feedback(ctx.getSource(),
-                                                                    "Cleared " + cleared + " block(s) from "
-                                                                            + target + " on zone " + zoneId + ".",
-                                                                    Formatting.YELLOW);
-                                                            return cleared;
-                                                        })))))
-
-                        .then(CommandManager.literal("remove")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
-                                        .then(CommandManager.argument("zoneId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ZONE_IDS)
-                                                .executes(ctx -> {
-                                                    String shipId = StringArgumentType.getString(ctx, "shipId");
-                                                    String zoneId = StringArgumentType.getString(ctx, "zoneId");
-
-                                                    if (SecondDawnRP.TACTICAL_SERVICE == null) {
-                                                        feedback(ctx.getSource(), "Tactical service not available.", Formatting.RED);
-                                                        return 0;
-                                                    }
-
-                                                    boolean removed = SecondDawnRP.TACTICAL_SERVICE
-                                                            .getHullDamageService().removeZone(shipId, zoneId);
-
-                                                    feedback(ctx.getSource(),
-                                                            removed
-                                                                    ? "Zone " + zoneId + " removed from ship " + shipId + "."
-                                                                    : "Zone '" + zoneId + "' not found on ship '" + shipId + "'.",
-                                                            removed ? Formatting.YELLOW : Formatting.RED);
-                                                    return removed ? 1 : 0;
-                                                }))))
-
-                        .then(CommandManager.literal("locate")
-                                .then(CommandManager.argument("shipId", StringArgumentType.word())
-                                        .suggests(SUGGEST_REGISTRY_SHIPS)
-                                        .then(CommandManager.argument("zoneId", StringArgumentType.word())
-                                                .suggests(SUGGEST_ZONE_IDS)
-                                                .executes(ctx -> {
-                                                    String shipId = StringArgumentType.getString(ctx, "shipId");
-                                                    String zoneId = StringArgumentType.getString(ctx, "zoneId");
-                                                    ServerPlayerEntity player = ctx.getSource().getPlayer();
-                                                    if (player == null) return 0;
-                                                    if (SecondDawnRP.TACTICAL_SERVICE == null) return 0;
-
-                                                    var zoneOpt = SecondDawnRP.TACTICAL_SERVICE
-                                                            .getHullDamageService().getZone(shipId, zoneId);
-                                                    if (zoneOpt.isEmpty()) {
-                                                        feedback(ctx.getSource(),
-                                                                "Zone '" + zoneId + "' not found on ship '" + shipId + "'.",
-                                                                Formatting.RED);
-                                                        return 0;
-                                                    }
-
-                                                    var zone = zoneOpt.get();
-                                                    int count = 0;
-                                                    for (net.minecraft.util.math.BlockPos pos : zone.getModelBlocks()) {
-                                                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
-                                                                new net.shard.seconddawnrp.tactical.network.LocateZoneBlockS2CPacket(
-                                                                        zoneId, "MODEL",
-                                                                        pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
-                                                        count++;
-                                                    }
-                                                    for (net.minecraft.util.math.BlockPos pos : zone.getRealShipBlocks()) {
-                                                        net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
-                                                                new net.shard.seconddawnrp.tactical.network.LocateZoneBlockS2CPacket(
-                                                                        zoneId, "REAL",
-                                                                        pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5));
-                                                        count++;
-                                                    }
-
-                                                    feedback(ctx.getSource(),
-                                                            "Located " + count + " block(s) for zone " + zoneId + ".",
-                                                            Formatting.AQUA);
-                                                    return count;
-                                                }))))
-                )
-        );
     }
 
     private static void feedback(ServerCommandSource src, String msg, Formatting color) {

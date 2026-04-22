@@ -21,6 +21,11 @@ import java.util.concurrent.ConcurrentHashMap;
  *   from damage_zone_model_blocks / damage_zone_real_blocks tables.
  *   initZonesForShip() merges persisted blocks into freshly created DamageZone objects.
  *   All block registration/removal methods write through to TacticalRepository immediately.
+ *
+ * Ship scoping (V15):
+ *   Effects and announcements are routed only to players inside the damaged ship's
+ *   registered bounding box via TacticalService.getPlayersOnShip(). Ships with no
+ *   bounds configured silently skip player effects — they are not broadcast globally.
  */
 public class HullDamageService {
 
@@ -36,6 +41,13 @@ public class HullDamageService {
 
     private TacticalRepository repository;
 
+    /**
+     * Back-reference to TacticalService for ship-scoped player resolution.
+     * Set in TacticalService constructor via setTacticalService().
+     * Never null after initialization completes.
+     */
+    private TacticalService tacticalService;
+
     private static final float VULNERABILITY_THRESHOLD = 0.25f;
 
     private static final Map<ShieldFacing, List<String>> FACING_ZONES = Map.of(
@@ -48,20 +60,18 @@ public class HullDamageService {
                     "zone.life_support")
     );
 
-    // ── Repository wiring ─────────────────────────────────────────────────────
+    // ── Wiring ────────────────────────────────────────────────────────────────
 
     public void setRepository(TacticalRepository repository) {
         this.repository = repository;
     }
 
+    public void setTacticalService(TacticalService tacticalService) {
+        this.tacticalService = tacticalService;
+    }
+
     // ── Persistence ───────────────────────────────────────────────────────────
 
-    /**
-     * Load all zone block registrations from the database.
-     * Called at server start before any encounters begin.
-     * Data is cached in preloadedBlocks and merged into DamageZone objects
-     * when initZonesForShip() runs.
-     */
     public void loadFromDatabase() {
         if (repository == null) return;
         preloadedBlocks = repository.loadAllZoneBlocks();
@@ -77,10 +87,6 @@ public class HullDamageService {
 
     // ── Zone initialisation ───────────────────────────────────────────────────
 
-    /**
-     * Called when a ship is added to an encounter.
-     * Creates DamageZone instances and merges any persisted block registrations.
-     */
     public void initZonesForShip(ShipState ship) {
         ShipClassDefinition def = ShipClassDefinition.get(ship.getShipClass()).orElse(null);
         if (def == null || def.getDamageZones().isEmpty()) return;
@@ -92,7 +98,6 @@ public class HullDamageService {
         for (String zoneId : zoneIds) {
             DamageZone zone = new DamageZone(zoneId, ship.getShipId(), zoneHp);
 
-            // Merge persisted block registrations if any exist
             Map<String, Map<String, List<Long>>> shipData =
                     preloadedBlocks.get(ship.getShipId());
             if (shipData != null) {
@@ -321,25 +326,29 @@ public class HullDamageService {
             default                  -> "System damage reported.";
         };
 
-        if (server != null) broadcastToCrew(server, "[DAMAGE] " + effectMsg, Formatting.RED);
+        // Broadcast only to crew on the damaged ship
+        broadcastToShip(ship.getShipId(), server,
+                "[DAMAGE] " + effectMsg, Formatting.RED);
         encounter.log("[ZONE] " + zoneId + ": " + effectMsg);
         if (server == null) return;
 
+        List<ServerPlayerEntity> shipCrew = resolveShipCrew(ship.getShipId(), server);
+
         switch (zoneId) {
             case "zone.life_support" -> {
-                applyEffectToZone(server, zone,
+                applyEffectToZone(server, zone, shipCrew,
                         net.minecraft.entity.effect.StatusEffects.NAUSEA,   100, 1);
-                applyEffectToZone(server, zone,
+                applyEffectToZone(server, zone, shipCrew,
                         net.minecraft.entity.effect.StatusEffects.BLINDNESS, 40, 0);
             }
             case "zone.engineering" ->
-                    applyEffectToZone(server, zone,
+                    applyEffectToZone(server, zone, shipCrew,
                             net.minecraft.entity.effect.StatusEffects.NAUSEA, 60, 0);
             case "zone.bridge" ->
-                    applyEffectToZone(server, zone,
+                    applyEffectToZone(server, zone, shipCrew,
                             net.minecraft.entity.effect.StatusEffects.SLOWNESS, 60, 0);
             case "zone.engines" ->
-                    applyEffectToZone(server, zone,
+                    applyEffectToZone(server, zone, shipCrew,
                             net.minecraft.entity.effect.StatusEffects.NAUSEA, 40, 0);
         }
     }
@@ -354,26 +363,26 @@ public class HullDamageService {
 
         switch (newState) {
             case DAMAGED -> {
-                broadcastToCrew(server,
+                broadcastToShip(ship.getShipId(), server,
                         "[TACTICAL] Hull integrity below 75%. Damage reported in multiple sections.",
                         Formatting.YELLOW);
                 generateEngineeringTasks(encounter, ship, 1);
             }
             case CRITICAL -> {
-                broadcastToCrew(server,
+                broadcastToShip(ship.getShipId(), server,
                         "[TACTICAL] ⚠ CRITICAL HULL DAMAGE — weapons efficiency reduced, shield regen halved!",
                         Formatting.RED);
-                applyEffectToAll(server,
+                applyEffectToShip(ship.getShipId(), server,
                         net.minecraft.entity.effect.StatusEffects.NAUSEA, 60, 0);
                 generateEngineeringTasks(encounter, ship, 2);
             }
             case FAILING -> {
-                broadcastToCrew(server,
+                broadcastToShip(ship.getShipId(), server,
                         "[TACTICAL] ⚠⚠ HULL FAILING — multiple systems offline! EVACUATE NON-ESSENTIAL PERSONNEL!",
                         Formatting.DARK_RED);
-                applyEffectToAll(server,
-                        net.minecraft.entity.effect.StatusEffects.NAUSEA,    100, 1);
-                applyEffectToAll(server,
+                applyEffectToShip(ship.getShipId(), server,
+                        net.minecraft.entity.effect.StatusEffects.NAUSEA,   100, 1);
+                applyEffectToShip(ship.getShipId(), server,
                         net.minecraft.entity.effect.StatusEffects.BLINDNESS,  40, 0);
                 generateEngineeringTasks(encounter, ship, 3);
             }
@@ -407,19 +416,12 @@ public class HullDamageService {
         boolean removed = shipZones != null && shipZones.remove(zoneId) != null;
         Set<String> destroyed = destroyedZones.get(shipId);
         if (destroyed != null) destroyed.remove(zoneId);
-        // Delete from DB
         if (repository != null)
             repository.deleteAllZoneBlocksForShipZone(shipId, zoneId);
         return removed;
     }
 
     // ── DamageZone block mutation with persistence ────────────────────────────
-
-    /**
-     * These are called from DamageZone directly via wrapper methods so that
-     * all mutations go through HullDamageService where the repository lives.
-     * DamageZone itself has no repo reference — single responsibility.
-     */
 
     public void persistRemoveModelBlock(String shipId, String zoneId, long blockPosLong) {
         if (repository != null)
@@ -483,22 +485,43 @@ public class HullDamageService {
 
     private ServerWorld resolveShipWorld(ShipState ship, MinecraftServer server) {
         if (server == null) return null;
-        // TODO: Phase 12 — store worldKey on ShipState
+        if (tacticalService != null) {
+            return tacticalService.getShipRegistryEntry(ship.getShipId())
+                    .map(entry -> entry.getRealShipWorldKey())
+                    .map(key -> {
+                        for (ServerWorld w : server.getWorlds()) {
+                            if (w.getRegistryKey().getValue().toString().equals(key)) return w;
+                        }
+                        return null;
+                    })
+                    .orElse(server.getOverworld());
+        }
         return server.getOverworld();
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
+    // ── Ship-scoped helpers ───────────────────────────────────────────────────
 
-    private void generateEngineeringTasks(EncounterState encounter,
-                                          ShipState ship, int count) {
-        encounter.log("[HULL] " + count + " repair task(s) generated for Engineering.");
+    /**
+     * Resolve the crew list for a ship. Falls back to an empty list if the ship
+     * has no bounds configured — effects are then silently skipped.
+     */
+    private List<ServerPlayerEntity> resolveShipCrew(String shipId, MinecraftServer server) {
+        if (server == null || tacticalService == null) return List.of();
+        return tacticalService.getPlayersOnShip(shipId, server);
     }
 
-    private void applyEffectToZone(MinecraftServer server, DamageZone zone,
+    /**
+     * Apply a status effect only to players inside the given damage zone's
+     * real-block bounding box, AND who are also on the ship (double-filtered).
+     * Zone bounds give local precision; ship bounds guard against cross-ship leakage.
+     */
+    private void applyEffectToZone(MinecraftServer server,
+                                   DamageZone zone,
+                                   List<ServerPlayerEntity> shipCrew,
                                    net.minecraft.registry.entry.RegistryEntry<
                                            net.minecraft.entity.effect.StatusEffect> effect,
                                    int durationTicks, int amplifier) {
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+        for (ServerPlayerEntity player : shipCrew) {
             if (zone.containsPlayer(player)) {
                 player.addStatusEffect(
                         new StatusEffectInstance(effect, durationTicks, amplifier));
@@ -506,19 +529,39 @@ public class HullDamageService {
         }
     }
 
-    private void applyEffectToAll(MinecraftServer server,
-                                  net.minecraft.registry.entry.RegistryEntry<
-                                          net.minecraft.entity.effect.StatusEffect> effect,
-                                  int durationTicks, int amplifier) {
-        for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
+    /**
+     * Apply a status effect to all crew on the ship (hull threshold events).
+     * Scoped to the ship's bounds — does NOT affect players on other ships.
+     */
+    private void applyEffectToShip(String shipId, MinecraftServer server,
+                                   net.minecraft.registry.entry.RegistryEntry<
+                                           net.minecraft.entity.effect.StatusEffect> effect,
+                                   int durationTicks, int amplifier) {
+        for (ServerPlayerEntity player : resolveShipCrew(shipId, server)) {
             player.addStatusEffect(
                     new StatusEffectInstance(effect, durationTicks, amplifier));
         }
     }
 
-    private void broadcastToCrew(MinecraftServer server, String message, Formatting color) {
+    /**
+     * Broadcast a message only to crew on the specified ship.
+     * If the ship has no bounds configured, the message is not sent to anyone —
+     * it is not broadcast globally as a fallback. This is intentional: a ship
+     * without bounds is not configured for live play.
+     */
+    private void broadcastToShip(String shipId, MinecraftServer server,
+                                 String message, Formatting color) {
+        if (server == null) return;
+        List<ServerPlayerEntity> crew = resolveShipCrew(shipId, server);
+        if (crew.isEmpty()) return;
         Text text = Text.literal(message).formatted(color);
-        server.getPlayerManager().getPlayerList()
-                .forEach(p -> p.sendMessage(text, false));
+        crew.forEach(p -> p.sendMessage(text, false));
+    }
+
+    // ── Task stubs ────────────────────────────────────────────────────────────
+
+    private void generateEngineeringTasks(EncounterState encounter,
+                                          ShipState ship, int count) {
+        encounter.log("[HULL] " + count + " repair task(s) generated for Engineering.");
     }
 }

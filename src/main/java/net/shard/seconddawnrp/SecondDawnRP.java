@@ -231,6 +231,7 @@ public class SecondDawnRP implements ModInitializer {
             entries.add(ModItems.TRICORDER);
             entries.add(ModItems.MEDICAL_PAD);
             entries.add(ModItems.GURNEY);
+            entries.add(ModItems.SHIP_BOUNDS_TOOL);
         });
 
         ItemGroup secondDawnRPGroup = Registry.register(
@@ -271,6 +272,7 @@ public class SecondDawnRP implements ModInitializer {
                             entries.add(ModItems.GURNEY);
                             entries.add(ModItems.DAMAGE_ZONE_TOOL);
                             entries.add(Item.fromBlock(ModBlocks.TACTICAL_CONSOLE));
+                            entries.add(ModItems.SHIP_BOUNDS_TOOL);
 
                         })
                         .build()
@@ -295,9 +297,12 @@ public class SecondDawnRP implements ModInitializer {
                     .applyVersion13(DATABASE_MANAGER.getConnection()); // V13
             net.shard.seconddawnrp.tactical.data.TacticalMigration
                     .applyVersion14(DATABASE_MANAGER.getConnection()); // V14 — ship_position table
+            net.shard.seconddawnrp.tactical.data.TacticalMigration
+                    .applyVersion15(DATABASE_MANAGER.getConnection()); // V15 — ship bounds + component ship_id
         } catch (java.sql.SQLException e) {
             throw new RuntimeException("Failed to apply tactical migrations", e);
         }
+
         net.shard.seconddawnrp.tactical.data.ShipClassDefinition
                 .loadAll(Path.of("data"));
 
@@ -306,6 +311,8 @@ public class SecondDawnRP implements ModInitializer {
         ENCOUNTER_SERVICE = new net.shard.seconddawnrp.tactical.service.EncounterService(tacticalRepository);
         TACTICAL_SERVICE = new net.shard.seconddawnrp.tactical.service.TacticalService(
                 ENCOUNTER_SERVICE, tacticalRepository);
+
+
 // Phase 12 — Passive ship movement
         var passiveShipRepo = new net.shard.seconddawnrp.tactical.data.SqlShipPositionRepository(DATABASE_MANAGER);
         PASSIVE_SHIP_MOVEMENT_SERVICE = new net.shard.seconddawnrp.tactical.data.PassiveShipMovementService(passiveShipRepo);
@@ -383,6 +390,7 @@ public class SecondDawnRP implements ModInitializer {
         catch (Exception e) { throw new RuntimeException("Failed to initialize component repository", e); }
 
         DEGRADATION_SERVICE = new DegradationService(componentRepository, TASK_SERVICE, degradationConfig);
+        DEGRADATION_SERVICE.setTacticalService(TACTICAL_SERVICE);
 
         DegradationNetworking.registerPayloads();
         new ComponentInteractListener().register();

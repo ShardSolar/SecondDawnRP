@@ -2,8 +2,8 @@ package net.shard.seconddawnrp.degradation.network;
 
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
-import net.minecraft.network.codec.PacketCodecs;
 import net.minecraft.network.packet.CustomPayload;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.Identifier;
 import net.shard.seconddawnrp.SecondDawnRP;
 import net.shard.seconddawnrp.degradation.data.ComponentEntry;
@@ -16,8 +16,14 @@ import java.util.List;
 
 /**
  * Sent server -> client when the player right-clicks with the Engineering PAD
- * in air. Carries a snapshot of all registered components so the client
- * screen can render them without a round-trip.
+ * in air. Carries a snapshot of registered components so the client screen
+ * can render them without a round-trip.
+ *
+ * Component list scoping (V15):
+ *   When a player opens the pad, the server resolves which ship they are
+ *   standing on via DegradationService.getComponentsForPlayer() and sends
+ *   only that ship's components. If the player is not inside any registered
+ *   ship bounds, all components are sent (fallback for unconfigured setups).
  */
 public record OpenEngineeringPadS2CPacket(
         List<ComponentSnapshot> components,
@@ -32,9 +38,7 @@ public record OpenEngineeringPadS2CPacket(
     public static final Id<OpenEngineeringPadS2CPacket> ID =
             new Id<>(Identifier.of(SecondDawnRP.MOD_ID, "open_engineering_pad"));
 
-    /**
-     * Lightweight view of a component for screen rendering.
-     */
+    /** Lightweight view of a component for screen rendering. */
     public record ComponentSnapshot(
             String componentId,
             String displayName,
@@ -122,39 +126,80 @@ public record OpenEngineeringPadS2CPacket(
                     buf -> {
                         int size = buf.readInt();
                         List<ComponentSnapshot> list = new ArrayList<>(size);
-                        for (int i = 0; i < size; i++) {
-                            list.add(SNAPSHOT_CODEC.decode(buf));
-                        }
+                        for (int i = 0; i < size; i++) list.add(SNAPSHOT_CODEC.decode(buf));
                         int wcSize = buf.readInt();
                         List<WarpCoreSnapshot> wcList = new ArrayList<>(wcSize);
                         for (int i = 0; i < wcSize; i++) wcList.add(WC_CODEC.decode(buf));
                         String focusedId = buf.readString();
                         return new OpenEngineeringPadS2CPacket(
-                                list,
-                                wcList,
-                                focusedId,
-                                buf.readString(),
-                                buf.readInt(),
-                                buf.readInt(),
-                                buf.readInt()
-                        );
+                                list, wcList, focusedId,
+                                buf.readString(), buf.readInt(), buf.readInt(), buf.readInt());
                     }
             );
 
     @Override
-    public Id<? extends CustomPayload> getId() {
-        return ID;
-    }
+    public Id<? extends CustomPayload> getId() { return ID; }
 
-    // ── Factory ───────────────────────────────────────────────────────────────
+    // ── Factories ─────────────────────────────────────────────────────────────
 
     /**
-     * Build a packet from the live service, sorted worst-first.
+     * Build a packet scoped to the opening player's ship.
+     *
+     * Uses DegradationService.getComponentsForPlayer() which resolves the
+     * ship from the player's world position via TacticalService.getShipAtPosition().
+     * Falls back to all components if the player is not inside any registered
+     * ship bounds (unconfigured server or player in a colony dimension).
+     *
+     * This is the primary factory — called by EngineeringPadItem.use().
+     */
+    public static OpenEngineeringPadS2CPacket fromServiceForPlayer(
+            DegradationService service, ServerPlayerEntity player) {
+        String worldKey = player.getWorld().getRegistryKey().getValue().toString();
+        List<ComponentEntry> components = service.getComponentsForPlayer(
+                worldKey, player.getX(), player.getY(), player.getZ());
+        return buildPacket(service, components, null);
+    }
+
+    /**
+     * Build a packet focused on a specific warp core (opened via controller block).
+     * Component list is still scoped to the opening player's ship.
+     */
+    public static OpenEngineeringPadS2CPacket fromServiceWithCoreForPlayer(
+            DegradationService service, ServerPlayerEntity player, String focusedCoreId) {
+        String worldKey = player.getWorld().getRegistryKey().getValue().toString();
+        List<ComponentEntry> components = service.getComponentsForPlayer(
+                worldKey, player.getX(), player.getY(), player.getZ());
+        return buildPacket(service, components, focusedCoreId);
+    }
+
+    /**
+     * Legacy factory — sends ALL components regardless of player position.
+     * Kept for backward compatibility with any call sites that don't have
+     * player context (e.g. admin debug commands). New code should use
+     * fromServiceForPlayer() instead.
      */
     public static OpenEngineeringPadS2CPacket fromService(DegradationService service) {
-        List<ComponentSnapshot> snapshots = new ArrayList<>();
-        for (ComponentEntry entry : service.getAllComponents()) {
-            // Resolve effective repair item — fall back to config default
+        List<ComponentEntry> components = new ArrayList<>(service.getAllComponents());
+        return buildPacket(service, components, null);
+    }
+
+    /** Build packet focused on a specific warp core, all components (legacy). */
+    public static OpenEngineeringPadS2CPacket fromServiceWithCore(
+            DegradationService service, String focusedCoreId) {
+        List<ComponentEntry> components = new ArrayList<>(service.getAllComponents());
+        return buildPacket(service, components, focusedCoreId);
+    }
+
+    // ── Shared packet builder ─────────────────────────────────────────────────
+
+    private static OpenEngineeringPadS2CPacket buildPacket(
+            DegradationService service,
+            List<ComponentEntry> componentEntries,
+            String focusedCoreId) {
+
+        // Build component snapshots
+        List<ComponentSnapshot> snapshots = new ArrayList<>(componentEntries.size());
+        for (ComponentEntry entry : componentEntries) {
             String repairId = entry.getRepairItemId() != null && !entry.getRepairItemId().isEmpty()
                     ? entry.getRepairItemId()
                     : service.getConfig().getDefaultRepairItemId();
@@ -176,10 +221,12 @@ public record OpenEngineeringPadS2CPacket(
         snapshots.sort(Comparator
                 .<ComponentSnapshot>comparingInt(s -> statusSortKey(s.status()))
                 .thenComparingInt(ComponentSnapshot::health));
-        // Build warp core snapshots for ALL registered cores
+
+        // Build warp core snapshots
         List<WarpCoreSnapshot> wcSnapshots = new ArrayList<>();
-        var wcService = net.shard.seconddawnrp.SecondDawnRP.WARP_CORE_SERVICE;
+        var wcService = SecondDawnRP.WARP_CORE_SERVICE;
         String wcState = ""; int wcFuel = 0, wcMaxFuel = 64, wcPower = 0;
+
         if (wcService != null && wcService.isRegistered()) {
             for (var wcEntry : wcService.getAll()) {
                 int coilHealth = wcService.getCoilHealth(wcEntry);
@@ -189,38 +236,34 @@ public record OpenEngineeringPadS2CPacket(
                         wcEntry.getFuelRods(), wcService.getConfig().getMaxFuelRods(),
                         wcEntry.getCurrentPowerOutput(), coilHealth, coilCount));
             }
-            // Legacy single-core fields — use first core for backward compat
             var first = wcService.getAll().iterator().next();
-            wcState  = first.getState().name();
-            wcFuel   = first.getFuelRods();
+            wcState   = first.getState().name();
+            wcFuel    = first.getFuelRods();
             wcMaxFuel = wcService.getConfig().getMaxFuelRods();
-            wcPower  = first.getCurrentPowerOutput();
+            wcPower   = first.getCurrentPowerOutput();
         }
-        return new OpenEngineeringPadS2CPacket(snapshots, wcSnapshots, null, wcState, wcFuel, wcMaxFuel, wcPower);
-    }
 
-    /** Build packet focused on a specific warp core (opened via controller block). */
-    public static OpenEngineeringPadS2CPacket fromServiceWithCore(
-            DegradationService service, String focusedCoreId) {
-        OpenEngineeringPadS2CPacket base = fromService(service);
-        // Filter warpCores to only the focused one
-        List<WarpCoreSnapshot> focused = base.warpCores().stream()
-                .filter(wc -> wc.entryId().equals(focusedCoreId))
-                .toList();
-        // Use focused core legacy fields
-        var wcService = net.shard.seconddawnrp.SecondDawnRP.WARP_CORE_SERVICE;
-        String wcState = ""; int wcFuel = 0, wcMaxFuel = 64, wcPower = 0;
-        if (wcService != null) {
-            var entry = wcService.getById(focusedCoreId);
-            if (entry.isPresent()) {
-                wcState = entry.get().getState().name();
-                wcFuel = entry.get().getFuelRods();
-                wcMaxFuel = wcService.getConfig().getMaxFuelRods();
-                wcPower = entry.get().getCurrentPowerOutput();
+        // If a focused core is requested, filter warp core list to that one only
+        if (focusedCoreId != null && !focusedCoreId.isEmpty()) {
+            List<WarpCoreSnapshot> focused = wcSnapshots.stream()
+                    .filter(wc -> wc.entryId().equals(focusedCoreId))
+                    .toList();
+            if (wcService != null) {
+                var entry = wcService.getById(focusedCoreId);
+                if (entry.isPresent()) {
+                    wcState   = entry.get().getState().name();
+                    wcFuel    = entry.get().getFuelRods();
+                    wcMaxFuel = wcService.getConfig().getMaxFuelRods();
+                    wcPower   = entry.get().getCurrentPowerOutput();
+                }
             }
+            return new OpenEngineeringPadS2CPacket(
+                    snapshots, focused, focusedCoreId,
+                    wcState, wcFuel, wcMaxFuel, wcPower);
         }
+
         return new OpenEngineeringPadS2CPacket(
-                base.components(), focused, focusedCoreId,
+                snapshots, wcSnapshots, null,
                 wcState, wcFuel, wcMaxFuel, wcPower);
     }
 

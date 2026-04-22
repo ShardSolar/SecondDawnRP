@@ -18,19 +18,19 @@ import net.shard.seconddawnrp.degradation.network.OpenEngineeringPadS2CPacket;
 
 import java.util.List;
 
-/*
+/**
  * The Engineering division's handheld PADD.
  *
- * Right-click in air: opens the Engineering PADD screen showing all
- * registered components, their health bars, and status at a glance.
+ * Right-click in air: opens the Engineering PADD screen showing components
+ * registered to the ship the player is currently standing on (V15 ship scoping).
+ * Falls back to all components when bounds are not configured.
  *
- * While held, nearby registered components emit subtle locator particles
- * to help identify them in-world.
+ * While held, nearby registered components emit locator particles.
  */
 public class EngineeringPadItem extends Item {
 
-    private static final double LOCATE_RADIUS_BLOCKS = 32.0;
-    private static final int LOCATE_PULSE_INTERVAL_TICKS = 15;
+    private static final double LOCATE_RADIUS_BLOCKS    = 32.0;
+    private static final int    LOCATE_PULSE_INTERVAL_TICKS = 15;
 
     public EngineeringPadItem(Settings settings) {
         super(settings);
@@ -39,16 +39,19 @@ public class EngineeringPadItem extends Item {
     @Override
     public TypedActionResult<ItemStack> use(World world, PlayerEntity user, Hand hand) {
         if (!world.isClient() && user instanceof ServerPlayerEntity serverPlayer) {
+            // V15: send only components belonging to the player's current ship
             net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(
                     serverPlayer,
-                    OpenEngineeringPadS2CPacket.fromService(SecondDawnRP.DEGRADATION_SERVICE)
+                    OpenEngineeringPadS2CPacket.fromServiceForPlayer(
+                            SecondDawnRP.DEGRADATION_SERVICE, serverPlayer)
             );
         }
         return TypedActionResult.success(user.getStackInHand(hand));
     }
 
     @Override
-    public void inventoryTick(ItemStack stack, World world, Entity entity, int slot, boolean selected) {
+    public void inventoryTick(ItemStack stack, World world, Entity entity,
+                              int slot, boolean selected) {
         if (world.isClient()) return;
         if (!(entity instanceof ServerPlayerEntity player)) return;
         if (SecondDawnRP.DEGRADATION_SERVICE == null) return;
@@ -84,8 +87,7 @@ public class EngineeringPadItem extends Item {
     @Override
     public void appendTooltip(ItemStack stack, TooltipContext context,
                               List<Text> tooltip, TooltipType type) {
-        tooltip.add(Text.literal("Engineering Systems PADD")
-                .formatted(Formatting.GRAY));
+        tooltip.add(Text.literal("Engineering Systems PADD").formatted(Formatting.GRAY));
         tooltip.add(Text.literal("Right-click: component overview")
                 .formatted(Formatting.DARK_GRAY));
         tooltip.add(Text.literal("Right-click block: inspect component")

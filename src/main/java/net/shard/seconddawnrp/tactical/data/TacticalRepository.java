@@ -26,8 +26,8 @@ public class TacticalRepository {
                     "INSERT INTO ship_registry (ship_id, registry_name, ship_class, faction, " +
                             "model_world_key, model_origin_long, real_ship_world_key, real_ship_origin_long, " +
                             "default_spawn_long, default_spawn_world_key, default_pos_x, default_pos_z, " +
-                            "default_heading, is_home_ship) " +
-                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
+                            "default_heading, is_home_ship, real_bounds_min_long, real_bounds_max_long) " +
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) " +
                             "ON CONFLICT(ship_id) DO UPDATE SET " +
                             "registry_name=excluded.registry_name, ship_class=excluded.ship_class, " +
                             "faction=excluded.faction, model_world_key=excluded.model_world_key, " +
@@ -39,7 +39,9 @@ public class TacticalRepository {
                             "default_pos_x=excluded.default_pos_x, " +
                             "default_pos_z=excluded.default_pos_z, " +
                             "default_heading=excluded.default_heading, " +
-                            "is_home_ship=excluded.is_home_ship")) {
+                            "is_home_ship=excluded.is_home_ship, " +
+                            "real_bounds_min_long=excluded.real_bounds_min_long, " +
+                            "real_bounds_max_long=excluded.real_bounds_max_long")) {
                 ps.setString(1, entry.getShipId());
                 ps.setString(2, entry.getRegistryName());
                 ps.setString(3, entry.getShipClass());
@@ -54,6 +56,8 @@ public class TacticalRepository {
                 ps.setDouble(12, entry.getDefaultPosZ());
                 ps.setFloat(13, entry.getDefaultHeading());
                 ps.setInt(14, entry.isHomeShip() ? 1 : 0);
+                ps.setLong(15, entry.getRealBoundsMinLong());
+                ps.setLong(16, entry.getRealBoundsMaxLong());
                 ps.executeUpdate();
             }
         } catch (SQLException e) {
@@ -90,8 +94,14 @@ public class TacticalRepository {
                             rs.getDouble("default_pos_x"),
                             rs.getDouble("default_pos_z"),
                             rs.getFloat("default_heading"));
+                    // is_home_ship — added in V14, use try/catch for DBs that predated it
                     try { e.setHomeShip(rs.getInt("is_home_ship") == 1); }
                     catch (SQLException ignored) {}
+                    // V15 — real ship bounding box
+                    try {
+                        e.setRealBoundsMinLong(rs.getLong("real_bounds_min_long"));
+                        e.setRealBoundsMaxLong(rs.getLong("real_bounds_max_long"));
+                    } catch (SQLException ignored) {}
                     result.add(e);
                 }
             }
@@ -324,10 +334,72 @@ public class TacticalRepository {
         }
     }
 
-    /** Delete all block registrations for a ship (used when removing a zone entirely). */
+    /** Delete all block registrations for a ship+zone pair. */
     public void deleteAllZoneBlocksForShipZone(String shipId, String zoneId) {
         deleteAllZoneModelBlocks(shipId, zoneId);
         deleteAllZoneRealBlocks(shipId, zoneId);
+    }
+
+    /**
+     * Delete ALL zone block registrations (both model and real) for an entire ship.
+     * Used by: /tactical zones clear <shipId>
+     * Returns the total number of rows deleted across both tables.
+     */
+    public int clearAllZoneBlocksForShip(String shipId) {
+        int deleted = 0;
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM damage_zone_model_blocks WHERE ship_id=?")) {
+                ps.setString(1, shipId);
+                deleted += ps.executeUpdate();
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "DELETE FROM damage_zone_real_blocks WHERE ship_id=?")) {
+                ps.setString(1, shipId);
+                deleted += ps.executeUpdate();
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to clear all zones for ship " + shipId + ": " + e.getMessage());
+        }
+        return deleted;
+    }
+
+    /**
+     * Count all zone block registrations for a ship across both tables.
+     * Used by: /tactical zones list <shipId>
+     * Returns: Map<zoneId, int[]{ modelCount, realCount }>
+     */
+    public Map<String, int[]> countZoneBlocksForShip(String shipId) {
+        Map<String, int[]> result = new LinkedHashMap<>();
+        try {
+            Connection conn = db.getConnection();
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT zone_id, COUNT(*) as cnt FROM damage_zone_model_blocks " +
+                            "WHERE ship_id=? GROUP BY zone_id")) {
+                ps.setString(1, shipId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.computeIfAbsent(rs.getString("zone_id"), k -> new int[2])
+                                [0] = rs.getInt("cnt");
+                    }
+                }
+            }
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "SELECT zone_id, COUNT(*) as cnt FROM damage_zone_real_blocks " +
+                            "WHERE ship_id=? GROUP BY zone_id")) {
+                ps.setString(1, shipId);
+                try (ResultSet rs = ps.executeQuery()) {
+                    while (rs.next()) {
+                        result.computeIfAbsent(rs.getString("zone_id"), k -> new int[2])
+                                [1] = rs.getInt("cnt");
+                    }
+                }
+            }
+        } catch (SQLException e) {
+            System.err.println("[Tactical] Failed to count zones for ship " + shipId + ": " + e.getMessage());
+        }
+        return result;
     }
 
     // ── Shipyard ──────────────────────────────────────────────────────────────

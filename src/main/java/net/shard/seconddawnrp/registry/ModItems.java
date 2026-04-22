@@ -14,6 +14,7 @@ import net.shard.seconddawnrp.medical.GurneyItem;
 import net.shard.seconddawnrp.medical.MedicalPadItem;
 import net.shard.seconddawnrp.medical.TricorderItem;
 import net.shard.seconddawnrp.roster.item.RosterPadItem;
+import net.shard.seconddawnrp.tactical.item.ShipBoundsToolItem;
 import net.shard.seconddawnrp.tasksystem.pad.OperationsPadItem;
 import net.shard.seconddawnrp.tasksystem.pad.TaskPadItem;
 import net.shard.seconddawnrp.tasksystem.terminal.TaskTerminalToolItem;
@@ -132,6 +133,10 @@ public class ModItems {
                     SecondDawnRP.id("damage_zone_tool"),
                     new net.shard.seconddawnrp.tactical.damage.DamageZoneToolItem(
                             new Item.Settings().maxCount(1)));
+
+    public static final Item SHIP_BOUNDS_TOOL = register("ship_bounds_tool",
+       new ShipBoundsToolItem(new Item.Settings().maxCount(1)));
+
 
     public static final Item TACTICAL_CONSOLE = Registry.register(
             Registries.ITEM,

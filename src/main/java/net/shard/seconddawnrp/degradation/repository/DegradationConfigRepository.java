@@ -16,6 +16,11 @@ import java.nio.file.Path;
  * {@code config/assets/seconddawnrp/degradation_config.json}.
  *
  * <p>If the file does not exist, defaults are written and returned.
+ *
+ * <p>The loaded {@link DegradationConfig} instance receives the file path at
+ * construction so it can call {@code save()} directly when the runtime
+ * {@code degradationDisabled} flag is toggled, without needing to route
+ * back through this repository.
  */
 public class DegradationConfigRepository {
 
@@ -40,40 +45,52 @@ public class DegradationConfigRepository {
             JsonObject obj = GSON.fromJson(r, JsonObject.class);
             if (obj == null) return DegradationConfig.defaults();
             return new DegradationConfig(
-                    getLong(obj, "drainIntervalMs", 5 * 60 * 1000L),
-                    getInt(obj, "drainPerTickNominal", 1),
-                    getInt(obj, "drainPerTickDegraded", 2),
-                    getInt(obj, "drainPerTickCritical", 3),
-                    getLong(obj, "taskGenerationCooldownMs", 30 * 60 * 1000L),
-                    getInt(obj, "healthPerRepair", 20),
-                    getInt(obj, "warningRadiusBlocks", 16),
-                    getInt(obj, "warningPulseTicksDegraded", 1200),
-                    getInt(obj, "warningPulseTicksCritical", 400),
-                    getString(obj, "defaultRepairItemId", "minecraft:iron_ingot"),
-                    getInt(obj, "defaultRepairItemCount", 1)
+                    getLong(obj,   "drainIntervalMs",           5 * 60 * 1000L),
+                    getInt(obj,    "drainPerTickNominal",        1),
+                    getInt(obj,    "drainPerTickDegraded",       2),
+                    getInt(obj,    "drainPerTickCritical",       3),
+                    getLong(obj,   "taskGenerationCooldownMs",   30 * 60 * 1000L),
+                    getInt(obj,    "healthPerRepair",            20),
+                    getInt(obj,    "warningRadiusBlocks",        16),
+                    getInt(obj,    "warningPulseTicksDegraded",  1200),
+                    getInt(obj,    "warningPulseTicksCritical",  400),
+                    getString(obj, "defaultRepairItemId",        "minecraft:iron_ingot"),
+                    getInt(obj,    "defaultRepairItemCount",     1),
+                    // New in V15 — defaults to false so existing configs are unaffected
+                    getBool(obj,   "degradationDisabled",        false),
+                    filePath
             );
         } catch (IOException e) {
             throw new RuntimeException("Failed to load " + FILE_NAME, e);
         }
     }
 
+    /**
+     * Full save — writes all fields including degradationDisabled.
+     * Called by init() on first run and by DegradationConfig.save() at runtime.
+     * Keeping this method here as well allows external callers (e.g. tests,
+     * admin commands) to save a fresh config without going through the instance.
+     */
     public void save(DegradationConfig config) throws IOException {
         JsonObject obj = new JsonObject();
-        obj.addProperty("drainIntervalMs", config.getDrainIntervalMs());
-        obj.addProperty("drainPerTickNominal", config.getDrainPerTickNominal());
-        obj.addProperty("drainPerTickDegraded", config.getDrainPerTickDegraded());
-        obj.addProperty("drainPerTickCritical", config.getDrainPerTickCritical());
-        obj.addProperty("taskGenerationCooldownMs", config.getTaskGenerationCooldownMs());
-        obj.addProperty("healthPerRepair", config.getHealthPerRepair());
-        obj.addProperty("warningRadiusBlocks", config.getWarningRadiusBlocks());
+        obj.addProperty("drainIntervalMs",          config.getDrainIntervalMs());
+        obj.addProperty("drainPerTickNominal",       config.getDrainPerTickNominal());
+        obj.addProperty("drainPerTickDegraded",      config.getDrainPerTickDegraded());
+        obj.addProperty("drainPerTickCritical",      config.getDrainPerTickCritical());
+        obj.addProperty("taskGenerationCooldownMs",  config.getTaskGenerationCooldownMs());
+        obj.addProperty("healthPerRepair",           config.getHealthPerRepair());
+        obj.addProperty("warningRadiusBlocks",       config.getWarningRadiusBlocks());
         obj.addProperty("warningPulseTicksDegraded", config.getWarningPulseTicksDegraded());
         obj.addProperty("warningPulseTicksCritical", config.getWarningPulseTicksCritical());
-        obj.addProperty("defaultRepairItemId", config.getDefaultRepairItemId());
-        obj.addProperty("defaultRepairItemCount", config.getDefaultRepairItemCount());
+        obj.addProperty("defaultRepairItemId",       config.getDefaultRepairItemId());
+        obj.addProperty("defaultRepairItemCount",    config.getDefaultRepairItemCount());
+        obj.addProperty("degradationDisabled",       config.isDegradationDisabled());
         try (Writer w = Files.newBufferedWriter(filePath)) {
             GSON.toJson(obj, w);
         }
     }
+
+    // ── JSON helpers ──────────────────────────────────────────────────────────
 
     private static long getLong(JsonObject obj, String key, long def) {
         return obj.has(key) ? obj.get(key).getAsLong() : def;
@@ -84,6 +101,11 @@ public class DegradationConfigRepository {
     }
 
     private static String getString(JsonObject obj, String key, String def) {
-        return obj.has(key) && !obj.get(key).isJsonNull() ? obj.get(key).getAsString() : def;
+        return obj.has(key) && !obj.get(key).isJsonNull()
+                ? obj.get(key).getAsString() : def;
+    }
+
+    private static boolean getBool(JsonObject obj, String key, boolean def) {
+        return obj.has(key) ? obj.get(key).getAsBoolean() : def;
     }
 }

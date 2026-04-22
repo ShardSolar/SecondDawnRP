@@ -12,15 +12,13 @@ import net.shard.seconddawnrp.degradation.data.DegradationConfig;
 import net.shard.seconddawnrp.degradation.network.ComponentWarningS2CPacket;
 import net.shard.seconddawnrp.degradation.repository.ComponentRepository;
 import net.shard.seconddawnrp.division.Division;
+import net.shard.seconddawnrp.tactical.data.ShipRegistryEntry;
+import net.shard.seconddawnrp.tactical.service.TacticalService;
 import net.shard.seconddawnrp.tasksystem.data.TaskObjectiveType;
 import net.shard.seconddawnrp.tasksystem.service.TaskService;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class DegradationService {
 
@@ -38,6 +36,22 @@ public class DegradationService {
     private MinecraftServer server;
     private boolean reactorCritical = false;
     private double reactorDrainMultiplier = 1.0;
+
+    /**
+     * Global degradation disable flag.
+     * When true, all component drain ticks are skipped.
+     * Persists across reloads via DegradationConfig (degradationDisabled field).
+     * Set via: /engineering degradation disable|enable
+     */
+    private boolean degradationGloballyDisabled = false;
+
+    /**
+     * Optional reference to TacticalService for ship-scoped component filtering.
+     * Set after both services are constructed in SecondDawnRP.java.
+     * Nullable — if not set, getComponentsForShip falls back to unfiltered list.
+     */
+    private TacticalService tacticalService;
+
     private final ComponentIntegrityChecker integrityChecker = new ComponentIntegrityChecker(this);
 
     public DegradationService(
@@ -50,11 +64,21 @@ public class DegradationService {
         this.config = config;
     }
 
-    // ── Lifecycle ─────────────────────────────────────────────────────────────
+    // ── Wiring ────────────────────────────────────────────────────────────────
 
     public void setServer(MinecraftServer server) {
         this.server = server;
     }
+
+    /**
+     * Wire in TacticalService after both are constructed.
+     * Called in SecondDawnRP.java after TACTICAL_SERVICE is assigned.
+     */
+    public void setTacticalService(TacticalService tacticalService) {
+        this.tacticalService = tacticalService;
+    }
+
+    // ── Lifecycle ─────────────────────────────────────────────────────────────
 
     public void reload() {
         cache.clear();
@@ -62,7 +86,10 @@ public class DegradationService {
             normalizeEntry(entry);
             cache.put(entry.getComponentId(), entry);
         }
-        System.out.println("[SecondDawnRP] Degradation system loaded " + cache.size() + " components.");
+        // Restore global disable state from config
+        this.degradationGloballyDisabled = config.isDegradationDisabled();
+        System.out.println("[SecondDawnRP] Degradation system loaded " + cache.size()
+                + " components. Degradation " + (degradationGloballyDisabled ? "DISABLED" : "enabled") + ".");
     }
 
     public void saveAll() {
@@ -75,6 +102,9 @@ public class DegradationService {
     // ── Server Tick ───────────────────────────────────────────────────────────
 
     public void tick(MinecraftServer server) {
+        // Global disable check — skip all drain when paused
+        if (degradationGloballyDisabled) return;
+
         long now = System.currentTimeMillis();
 
         for (ComponentEntry entry : new ArrayList<>(cache.values())) {
@@ -197,12 +227,27 @@ public class DegradationService {
                 .forEach(p -> net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(p, packet));
     }
 
-    // ── Missing Block Handling ────────────────────────────────────────────────
+    // ── Global degradation disable ────────────────────────────────────────────
 
     /**
-     * Call this when a registered block is physically broken.
-     * The component remains registered, but is marked missing and forced OFFLINE.
+     * Pause all component degradation server-wide.
+     * Persisted to DegradationConfig so it survives restart.
+     * Called by: /engineering degradation disable
      */
+    public void setDegradationGloballyDisabled(boolean disabled) {
+        this.degradationGloballyDisabled = disabled;
+        config.setDegradationDisabled(disabled);
+        config.save();
+        System.out.println("[SecondDawnRP] Degradation globally "
+                + (disabled ? "DISABLED" : "ENABLED") + ".");
+    }
+
+    public boolean isDegradationGloballyDisabled() {
+        return degradationGloballyDisabled;
+    }
+
+    // ── Missing Block Handling ────────────────────────────────────────────────
+
     public Optional<ComponentEntry> markBlockMissing(String worldKey, long blockPosLong) {
         return markBlockMissing(worldKey, blockPosLong, System.currentTimeMillis());
     }
@@ -228,10 +273,6 @@ public class DegradationService {
         return Optional.of(entry);
     }
 
-    /**
-     * Checks the actual world block and updates missing state.
-     * If restoreHealthOnReturn is true, replacing the block can bring the component back online.
-     */
     public void refreshMissingState(ComponentEntry entry, boolean restoreHealthOnReturn, long now) {
         ServerWorld world = resolveWorld(entry.getWorldKey());
         if (world == null) return;
@@ -316,7 +357,8 @@ public class DegradationService {
         entry.setLastTaskGeneratedMs(now);
         repository.save(entry);
 
-        System.out.println("[SecondDawnRP] Auto-generated repair task for component '" + entry.getComponentId() + "'.");
+        System.out.println("[SecondDawnRP] Auto-generated repair task for component '"
+                + entry.getComponentId() + "'.");
     }
 
     private String generateTaskId(ComponentEntry entry) {
@@ -336,6 +378,21 @@ public class DegradationService {
             String displayName,
             UUID registeredBy
     ) {
+        return register(worldKey, blockPosLong, blockTypeId, displayName, registeredBy, null);
+    }
+
+    /**
+     * Register a component with an optional ship binding.
+     * shipId may be null for global/unowned components.
+     */
+    public ComponentEntry register(
+            String worldKey,
+            long blockPosLong,
+            String blockTypeId,
+            String displayName,
+            UUID registeredBy,
+            String shipId
+    ) {
         boolean alreadyExists = cache.values().stream()
                 .anyMatch(e -> e.getWorldKey().equals(worldKey)
                         && e.getBlockPosLong() == blockPosLong);
@@ -348,23 +405,12 @@ public class DegradationService {
         long now = System.currentTimeMillis();
 
         ComponentEntry entry = new ComponentEntry(
-                id,
-                worldKey,
-                blockPosLong,
-                blockTypeId,
-                displayName,
-                100,
-                ComponentStatus.NOMINAL,
-                now,
-                0L,
-                registeredBy,
-                null,
-                0,
-                false
+                id, worldKey, blockPosLong, blockTypeId, displayName,
+                100, ComponentStatus.NOMINAL, now, 0L, registeredBy,
+                null, 0, false, shipId
         );
 
         normalizeEntry(entry);
-
         cache.put(id, entry);
         repository.save(entry);
         return entry;
@@ -394,7 +440,6 @@ public class DegradationService {
         ComponentStatus previousStatus = entry.getStatus();
 
         if (entry.isMissingBlock()) {
-            // Can't repair a physically missing block with a normal repair action.
             return Optional.of(entry);
         }
 
@@ -455,6 +500,49 @@ public class DegradationService {
         return cache.values();
     }
 
+    /**
+     * Get all components registered to a specific ship by shipId.
+     * Returns only components with a matching ship_id — legacy/global components
+     * (ship_id == null) are excluded.
+     *
+     * Used by the Engineering Pad screen when the player's ship can be resolved.
+     */
+    public List<ComponentEntry> getComponentsForShip(String shipId) {
+        if (shipId == null) return List.of();
+        return cache.values().stream()
+                .filter(e -> shipId.equals(e.getShipId()))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Get components appropriate for a player standing at the given position.
+     *
+     * Resolution order:
+     *   1. Ask TacticalService which ship (if any) owns this position.
+     *   2. If a ship is found, return getComponentsForShip(shipId).
+     *   3. If no ship found (position not within any registered bounds), fall back
+     *      to returning ALL components — this covers server setups that haven't
+     *      configured ship bounds yet (pre-V15 or admin oversight).
+     *
+     * Used by the Engineering Pad screen open handler.
+     */
+    public List<ComponentEntry> getComponentsForPlayer(String worldKey,
+                                                       double x, double y, double z) {
+        if (tacticalService != null) {
+            Optional<ShipRegistryEntry> ship =
+                    tacticalService.getShipAtPosition(worldKey, x, y, z);
+            if (ship.isPresent()) {
+                List<ComponentEntry> shipComponents =
+                        getComponentsForShip(ship.get().getShipId());
+                // If the ship is found but has no components registered yet, fall through
+                // to the global list so Engineering Pad isn't blank during initial setup.
+                if (!shipComponents.isEmpty()) return shipComponents;
+            }
+        }
+        // Fallback: return all components (global / unconfigured setup)
+        return new ArrayList<>(cache.values());
+    }
+
     public Optional<ComponentEntry> getByPosition(String worldKey, long blockPosLong) {
         return cache.values().stream()
                 .filter(e -> e.getWorldKey().equals(worldKey)
@@ -480,7 +568,8 @@ public class DegradationService {
         this.reactorCritical = critical;
         this.reactorDrainMultiplier = multiplier;
         if (critical) {
-            System.out.println("[SecondDawnRP] Reactor critical — degradation multiplier: " + multiplier + "x");
+            System.out.println("[SecondDawnRP] Reactor critical — degradation multiplier: "
+                    + multiplier + "x");
         }
     }
 
@@ -507,12 +596,11 @@ public class DegradationService {
 
         String msgText = missingBlock
                 ? "[Engineering] MISSING COMPONENT: " + entry.getDisplayName()
-                + " has been removed from its registered position. Immediate replacement required."
+                  + " has been removed from its registered position. Immediate replacement required."
                 : "[Engineering] OFFLINE: " + entry.getDisplayName()
-                + " is non-functional. Immediate repair required.";
+                  + " is non-functional. Immediate repair required.";
 
         Text msg = Text.literal(msgText).formatted(Formatting.DARK_RED);
-
         server.getPlayerManager().getPlayerList()
                 .forEach(p -> p.sendMessage(msg, false));
     }
@@ -538,7 +626,6 @@ public class DegradationService {
 
     private ServerWorld resolveWorld(String worldKey) {
         if (server == null) return null;
-
         for (ServerWorld world : server.getWorlds()) {
             if (world.getRegistryKey().getValue().toString().equals(worldKey)) {
                 return world;
